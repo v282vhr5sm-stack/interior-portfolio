@@ -20,8 +20,8 @@ create table if not exists public.pf_photos (
   site_id uuid references public.pf_sites(id) on delete cascade,
   phase text not null default 'after' check (phase in ('before', 'during', 'after')),
   space text not null default '기타',
-  t text not null,            -- 썸네일 경로 (storage)
-  l text not null,            -- 큰 사진 경로 (storage)
+  t text not null,            -- 썸네일 경로 (R2)
+  l text not null,            -- 큰 사진 경로 (R2)
   w int, h int,
   src_name text, src_size bigint,
   created_at timestamptz not null default now()
@@ -51,18 +51,7 @@ create policy "pf photos write" on public.pf_photos for all to authenticated
 grant select on public.pf_sites, public.pf_photos to anon;
 grant select, insert, update, delete on public.pf_sites, public.pf_photos to authenticated;
 
--- 사진 저장소 (공개 읽기, 쓰기는 본인 폴더만)
-insert into storage.buckets (id, name, public) values ('portfolio', 'portfolio', true)
-  on conflict (id) do update set public = true;
-drop policy if exists "pf storage insert" on storage.objects;
-drop policy if exists "pf storage update" on storage.objects;
-drop policy if exists "pf storage delete" on storage.objects;
-create policy "pf storage insert" on storage.objects for insert to authenticated
-  with check (bucket_id = 'portfolio' and (storage.foldername(name))[1] = auth.uid()::text);
-create policy "pf storage update" on storage.objects for update to authenticated
-  using (bucket_id = 'portfolio' and (storage.foldername(name))[1] = auth.uid()::text);
-create policy "pf storage delete" on storage.objects for delete to authenticated
-  using (bucket_id = 'portfolio' and (storage.foldername(name))[1] = auth.uid()::text);
+-- 사진 파일은 Cloudflare R2 에 저장 (worker 폴더 참고)
 
 -- 실시간 반영 (다른 기기에서 올린 사진이 바로 보이게)
 do $$ begin

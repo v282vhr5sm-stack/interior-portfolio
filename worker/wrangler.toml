@@ -1,0 +1,14 @@
+name = "interior-portfolio-photos"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "interior-portfolio"
+
+[vars]
+SUPABASE_URL = "https://wcxowlhcneuyiwyxtisq.supabase.co"
+SUPABASE_KEY = "sb_publishable_ydS1XaRSe8qt2kskvA_Q4A_AydWqvB6"
+# 관리 페이지를 여는 주소들 (여기서만 올리기 가능)
+ALLOWED_ORIGINS = "https://v282vhr5sm-stack.github.io, http://localhost:5181"
+LIMIT_BYTES = "10737418240"

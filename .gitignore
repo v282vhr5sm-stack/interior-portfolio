@@ -1,2 +1,4 @@
 사진/
 .serve.cjs
+worker/node_modules/
+worker/.wrangler/

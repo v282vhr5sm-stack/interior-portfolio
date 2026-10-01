@@ -1,13 +1,12 @@
 (() => {
   const CFG = window.SITE_CONFIG;
   const ADMIN = !!window.PF_ADMIN;
-  const BUCKET = 'portfolio';
   const PH_NAME = { before: '공사전', during: '공사중', after: '공사후' };
   const PH_ORDER = ['before', 'during', 'after'];
   const $ = s => document.querySelector(s);
   const app = $('#app');
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const imgUrl = p => `${CFG.SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${p}`;
+  const imgUrl = p => `${CFG.STORAGE_URL}/p/${p}`;
   const clean = n => String(n).replace(/^\d+\s*[._\-)]\s*/, '').trim() || String(n);
   const spaceOf = n => { const c = clean(n); return CFG.spaceAlias[c] || c; };
 
@@ -409,8 +408,7 @@
     };
   }
   async function removeFiles(ps) {
-    const paths = ps.flatMap(p => [p.t, p.l]);
-    for (let i = 0; i < paths.length; i += 100) await sb.storage.from(BUCKET).remove(paths.slice(i, i + 100));
+    await deleteKeys(ps.flatMap(p => [p.t, p.l]));
   }
 
   // --- 올리기 ---
@@ -471,6 +469,7 @@
         </section>` : ''}
 
         <section class="panel">
+          <div id="usage"></div>
           ${adminLinkBox()}
           <div class="adminbar" style="margin-top:12px"><button class="btn" id="logout">로그아웃</button></div>
         </section>
@@ -495,6 +494,7 @@
     if ($('#upDir')) $('#upDir').onchange = e => planFolder([...e.target.files]);
     $('#logout').onclick = async () => { await sb.auth.signOut(); localStorage.removeItem(CACHE); location.reload(); };
     bindLinkBox();
+    loadUsage();
   }
   function ready() { return up.site && (up.site !== '__new' || up.newName.trim()) && up.space; }
   function pickHint() {
@@ -532,7 +532,11 @@
     $('#upFill').style.width = (queue.total ? (queue.done + queue.failed.length) / queue.total * 100 : 0) + '%';
     const q = $('#queue'); if (q) q.outerHTML = queueHTML();
   }
-  function enqueue(jobs) {
+  async function enqueue(jobs) {
+    try {
+      if (!usage) { const r = await fetch(`${CFG.STORAGE_URL}/usage`, { headers: await authHeader() }); if (r.ok) usage = await r.json(); }
+      if (usage && usage.bytes + jobs.length * 700000 > usage.limit) return toast("저장공간(10GB)이 꽉 차서 더 올릴 수 없어요. 안 쓰는 사진을 지워주세요.", 5000);
+    } catch {}
     if (queue.done + queue.failed.length >= queue.total) { queue.total = 0; queue.done = 0; queue.failed = []; }
     queue.total += jobs.length; queue.jobs.push(...jobs);
     updateQueueUI();
@@ -547,7 +551,7 @@
       updateQueueUI();
     }
     queue.running--;
-    if (!queue.running) { scheduleReload(); if (queue.done) toast(`${queue.done}장 올렸어요`); }
+    if (!queue.running) { scheduleReload(); usage = null; loadUsage(); if (queue.done) toast(`${queue.done}장 올렸어요`); }
   }
   window.addEventListener('beforeunload', e => { if (queue.running) { e.preventDefault(); e.returnValue = ''; } });
 
@@ -560,12 +564,36 @@
     URL.revokeObjectURL(url);
     const id = crypto.randomUUID(), uid = session.user.id;
     const t = `${uid}/${id}_t.jpg`, l = `${uid}/${id}_l.jpg`;
-    const opt = { contentType: 'image/jpeg', cacheControl: '31536000', upsert: false };
-    let r = await sb.storage.from(BUCKET).upload(t, thumb.blob, opt); if (r.error) throw r.error;
-    r = await sb.storage.from(BUCKET).upload(l, large.blob, opt);
-    if (r.error) { await sb.storage.from(BUCKET).remove([t]); throw r.error; }
+    await putFile(t, thumb.blob);
+    try { await putFile(l, large.blob); } catch (e) { await deleteKeys([t]); throw e; }
     const ins = await sb.from('pf_photos').insert({ id, site_id: siteId, phase, space, t, l, w: thumb.w, h: thumb.h, src_name: file.name, src_size: file.size });
-    if (ins.error) { await sb.storage.from(BUCKET).remove([t, l]); throw ins.error; }
+    if (ins.error) { await deleteKeys([t, l]); throw ins.error; }
+    usage = null;
+  }
+  // --- 사진 저장소 (Cloudflare R2 Worker) ---
+  async function authHeader() {
+    const { data } = await sb.auth.getSession();
+    return { Authorization: 'Bearer ' + data.session.access_token };
+  }
+  async function putFile(key, blob) {
+    const r = await fetch(`${CFG.STORAGE_URL}/p/${key}`, { method: 'PUT', headers: { ...(await authHeader()), 'Content-Type': 'image/jpeg' }, body: blob });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || '업로드 실패 ' + r.status);
+  }
+  async function deleteKeys(keys) {
+    if (!keys.length) return;
+    await fetch(`${CFG.STORAGE_URL}/delete`, { method: 'POST', headers: { ...(await authHeader()), 'Content-Type': 'application/json' }, body: JSON.stringify({ keys }) }).catch(() => {});
+    usage = null;
+  }
+  let usage = null;
+  async function loadUsage() {
+    const el = $('#usage'); if (!el) return;
+    try {
+      if (!usage) { const r = await fetch(`${CFG.STORAGE_URL}/usage`, { headers: await authHeader() }); if (!r.ok) throw 0; usage = await r.json(); }
+      const pct = Math.min(100, usage.bytes / usage.limit * 100);
+      const fmt = b => b >= 1073741824 ? (b / 1073741824).toFixed(2) + 'GB' : Math.round(b / 1048576) + 'MB';
+      el.innerHTML = `<div class="usage ${pct >= 80 ? 'warn' : ''}"><div><b>저장공간</b><span>${fmt(usage.bytes)} / ${fmt(usage.limit)} · 사진 ${Math.round(usage.count / 2)}장</span></div>
+        <i><b style="width:${pct.toFixed(1)}%"></b></i>${pct >= 80 ? '<p class="err">저장공간이 거의 찼어요. 안 쓰는 사진을 정리해 주세요.</p>' : ''}</div>`;
+    } catch { el.innerHTML = '<div class="usage"><span>저장공간 정보를 못 불러왔어요</span></div>'; }
   }
   function toJpeg(img, max, q) {
     const W = img.naturalWidth, H = img.naturalHeight, s = Math.min(1, max / Math.max(W, H));

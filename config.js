@@ -24,7 +24,10 @@ window.SITE_CONFIG = {
   // 현장명 없는 작업물을 부르는 이름
   etcName: '기타 작업물',
 
-  // Supabase (견적 작업실과 같은 프로젝트). Publishable 키는 공개돼도 되는 키입니다.
+  // Supabase (현장·사진 정보만 저장, 견적 작업실과 같은 프로젝트). Publishable 키는 공개돼도 되는 키입니다.
   SUPABASE_URL: 'https://wcxowlhcneuyiwyxtisq.supabase.co',
   SUPABASE_KEY: 'sb_publishable_ydS1XaRSe8qt2kskvA_Q4A_AydWqvB6',
+
+  // 사진 저장소 (Cloudflare R2 Worker 주소) — 배포 후 자동으로 채워집니다
+  STORAGE_URL: "",
 };
