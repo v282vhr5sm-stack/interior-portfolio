@@ -48,7 +48,7 @@
     photos = photos.map(p => ({ ...p, site: p.site_id || 'etc' }));
     if (photos.some(p => p.site === 'etc')) list.push(etc);
     siteById = Object.fromEntries(list.map(s => [s.id, s]));
-    photos = photos.filter(p => siteById[p.site]);
+    photos = photos.filter(p => siteById[p.site] && (ADMIN || p.phase === 'after')); // 고객은 공사후 사진만
     DATA = { sites: list, photos };
   }
   try { const c = JSON.parse(localStorage.getItem(CACHE)); if (c) { setData(c.sites, c.photos); loaded = true; } } catch {}
@@ -96,7 +96,8 @@
     const ratio = p.w && p.h && !opts.strip ? ` style="aspect-ratio:${p.w}/${p.h}"` : '';
     const badge = p.phase !== 'after' && !opts.noBadge ? `<span class="badge ${p.phase}">${PH_NAME[p.phase]}</span>` : '';
     const cover = ADMIN && s.cover === p.id ? '<span class="badge cover">대표</span>' : '';
-    return `<figure class="ph" data-i="${idx}"${ratio}>${badge}${cover}
+    const del = ADMIN ? '<button class="ph-del" type="button" aria-label="삭제" title="삭제">×</button>' : '';
+    return `<figure class="ph" data-i="${idx}"${ratio}>${badge}${cover}${del}
       <img src="${imgUrl(p.t)}" loading="lazy" alt="" draggable="false">
       ${opts.noCap ? '' : `<figcaption class="cap">${esc(p.space)} · ${esc(s.name)}</figcaption>`}</figure>`;
   };
@@ -191,7 +192,7 @@
           <h1>${esc(s.name)} ${ADMIN && s.hidden ? '<span class="badge hid">고객에게 숨김</span>' : ''}</h1>
           ${info.length ? `<dl class="info">${info.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : ''}
           ${s.info['설명'] ? `<p class="desc">${esc(s.info['설명'])}</p>` : ''}
-          <div class="phase-sum">${PH_ORDER.filter(ph => pc[ph]).map(ph => `<span class="badge ${ph}">${PH_NAME[ph]} ${pc[ph]}</span>`).join('')}</div>
+          <div class="phase-sum" ${ADMIN ? '' : 'hidden'}>${PH_ORDER.filter(ph => pc[ph]).map(ph => `<span class="badge ${ph}">${PH_NAME[ph]} ${pc[ph]}</span>`).join('')}</div>
           ${ADMIN ? siteAdminBar(s) : ''}
         </div>
       </div>
@@ -210,7 +211,19 @@
   // ---------- 라이트박스 ----------
   let lbList = [], lbI = 0;
   function bindPhotos(list) {
-    app.querySelectorAll('.ph[data-i]').forEach(el => el.onclick = () => openLB(list, +el.dataset.i));
+    app.querySelectorAll('.ph[data-i]').forEach(el => el.onclick = e => {
+      if (ADMIN && e.target.closest('.ph-del')) { e.stopPropagation(); return deletePhoto(list[+el.dataset.i]); }
+      openLB(list, +el.dataset.i);
+    });
+  }
+  async function deletePhoto(p) {
+    if (!p || !confirm('이 사진을 삭제할까요? 되돌릴 수 없어요.')) return false;
+    const { error } = await sb.from('pf_photos').delete().eq('id', p.id);
+    if (error) { toast('삭제 실패: ' + error.message); return false; }
+    DATA.photos = DATA.photos.filter(x => x.id !== p.id);
+    const s = siteById[p.site]; if (s && s.cover === p.id) s.cover = null;
+    usage = null; toast('삭제했어요'); render();
+    return true;
   }
   function openLB(list, i) { if (!list.length) return; lbList = list; lbI = i; $('#lb').hidden = false; document.body.style.overflow = 'hidden'; showLB(); }
   function closeLB() {
@@ -429,7 +442,8 @@
   }
 
   // --- 올리기 ---
-  const IMG = /\.(jpe?g|png|webp|gif|bmp|heic|heif|avif)$/i;
+  // 진짜 JPEG/PNG인지 파일 앞부분으로 확인 (JPEG: FF D8 FF, PNG: 89 50 4E 47) — 확장자만 바꾼 다른 파일 걸러내기
+  const isPhoto = async f => { try { const b = new Uint8Array(await f.slice(0, 4).arrayBuffer()); return (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) || (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47); } catch { return false; } };
   const PHASE_RE = [
     ['before', /^(공사\s*전|시공\s*전|전|before|비포)$/i],
     ['during', /^(공사\s*중|시공\s*중|중|during|진행)$/i],
@@ -754,7 +768,7 @@
       else site = clean(ps[0]);
       if (/^(정보|info)\.txt$/i.test(name) && site && !rest.length) { infos[site] = await f.text(); continue; }
       if (name.startsWith('.') || name.startsWith('~')) continue;
-      if (!IMG.test(name)) { if (!/\.(txt|ini|db|ds_store)$/i.test(name)) skipped.push(f.webkitRelativePath); continue; }
+      if (!/\.(jpe?g|png)$/i.test(name) || !(await isPhoto(f))) { if (!/\.(txt|ini|db|ds_store)$/i.test(name)) skipped.push(f.webkitRelativePath); continue; }
       let phase = 'after';
       if (site && rest.length && phaseOf(rest[0])) { phase = phaseOf(rest[0]); rest = rest.slice(1); }
       items.push({ file: f, siteName: site, phase, space: rest.length ? spaceOf(rest[0]) : '기타' });
@@ -773,7 +787,7 @@
         return `<li><b>${k === '\u0000' ? esc(CFG.etcName) : esc(k)}</b>${k !== '\u0000' && !nameToId[k] ? ' <span class="tag">새 현장</span>' : ''}
           <small>${PH_ORDER.filter(ph => by[ph]).map(ph => `${PH_NAME[ph]} ${by[ph]}`).join(' · ')} — ${sortSpaces(arr.map(i => i.space)).join(', ')}</small></li>`;
       }).join('')}</ul>
-      ${skipped.length ? `<p class="err">사진이 아닌 파일 ${skipped.length}개는 빼요</p>` : ''}
+      ${skipped.length ? `<p class="err">JPEG·PNG 사진이 아닌 파일 ${skipped.length}개는 안 올려요</p>` : ''}
       ${todo.length ? `<button class="btn primary" id="dirGo">${todo.length}장 올리기</button>` : ''}</div>`;
     if ($('#dirGo')) $('#dirGo').onclick = runFolder;
   }

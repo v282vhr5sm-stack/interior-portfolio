@@ -162,7 +162,7 @@ main { max-width: 1280px; margin: 0 auto; padding: 20px var(--gutter) 60px; min-
 .row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 10px; }
 .tabs a.up { color: var(--accent); }
 .tabs a.up.on { color: var(--ink); }
-.badge.cover { background: var(--accent); position: absolute; top: 8px; right: 8px; left: auto; z-index: 2; }
+.badge.cover { background: var(--accent); position: absolute; bottom: 8px; left: 8px; top: auto; z-index: 2; }
 .badge.hid { background: #b3261e; vertical-align: middle; font-size: 12px; }
 .card .cover { position: relative; display: flex; align-items: center; justify-content: center; }
 .card .cover .badge.hid { position: absolute; top: 10px; left: 10px; }
@@ -264,3 +264,8 @@ button.chip { cursor: pointer; }
 .crop-bar .btn { background: rgba(255,255,255,.1); color: #fff; border-color: rgba(255,255,255,.2); }
 .crop-bar .btn.primary { background: #fff; color: var(--ink); border-color: #fff; }
 .crop-bar .btn:disabled { opacity: .4; }
+
+/* 관리자: 사진 모서리 삭제(X) */
+.ph-del { position: absolute; top: 6px; right: 6px; z-index: 3; width: 26px; height: 26px; border-radius: 50%; border: 0; padding: 0; background: rgba(0,0,0,.55); color: #fff; font-size: 17px; line-height: 26px; text-align: center; cursor: pointer; opacity: .85; }
+.ph-del:hover { background: #b3261e; opacity: 1; }
+@media (hover: none) { .ph-del { width: 30px; height: 30px; line-height: 30px; } }

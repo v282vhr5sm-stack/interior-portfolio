@@ -45,7 +45,7 @@ export default {
         const sites = (await env.DB.prepare(`SELECT * FROM sites ${admin ? '' : 'WHERE hidden = 0'} ORDER BY sort DESC`).all()).results.map(siteOut);
         const ok = new Set(sites.map(s => s.id));
         const photos = (await env.DB.prepare('SELECT * FROM photos ORDER BY created_at').all()).results
-          .filter(p => admin || p.site_id === null || ok.has(p.site_id))
+          .filter(p => admin || ((p.site_id === null || ok.has(p.site_id)) && p.phase === 'after')) // 고객은 공사후만
           .map(p => admin ? p : { ...p, src_name: undefined, src_size: undefined });
         return json({ sites, photos, v: await getVersion(env), admin });
       }
@@ -69,7 +69,11 @@ export default {
         const key = decodeURIComponent(path.slice(3));
         if (!/^ph\/[\w-]+\.jpg$/.test(key)) return json({ error: '잘못된 경로' }, 403);
         if ((+req.headers.get('Content-Length') || 0) > MAX_BYTES) return json({ error: '파일이 너무 커요' }, 413);
-        await env.BUCKET.put(key, req.body, { httpMetadata: { contentType: 'image/jpeg' } });
+        const buf = await req.arrayBuffer();
+        if (buf.byteLength > MAX_BYTES) return json({ error: '파일이 너무 커요' }, 413);
+        const h = new Uint8Array(buf, 0, Math.min(3, buf.byteLength));
+        if (h[0] !== 0xFF || h[1] !== 0xD8 || h[2] !== 0xFF) return json({ error: 'JPEG 사진만 올릴 수 있어요' }, 415);
+        await env.BUCKET.put(key, buf, { httpMetadata: { contentType: 'image/jpeg' } });
         return json({ ok: true, key });
       }
       if (req.method === 'POST' && path === '/delete') {
