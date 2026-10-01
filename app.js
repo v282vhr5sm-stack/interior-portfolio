@@ -6,13 +6,33 @@
   const $ = s => document.querySelector(s);
   const app = $('#app');
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const imgUrl = p => `${CFG.STORAGE_URL}/p/${p}`;
+  const imgUrl = p => `${CFG.API_URL}/p/${p}`;
   const clean = n => String(n).replace(/^\d+\s*[._\-)]\s*/, '').trim() || String(n);
   const spaceOf = n => { const c = clean(n); return CFG.spaceAlias[c] || c; };
 
-  const sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_KEY, ADMIN
-    ? { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'pf-admin-auth' } }
-    : { auth: { persistSession: false, autoRefreshToken: false, storageKey: 'pf-public' } });
+  // ---------- 서버 (Cloudflare Worker) ----------
+  const TOKEN = 'pf-admin-token';
+  const getToken = () => { try { return ADMIN ? localStorage.getItem(TOKEN) : null; } catch { return null; } };
+  async function api(method, path, body) {
+    const headers = {};
+    const tk = getToken(); if (tk) headers.Authorization = 'Bearer ' + tk;
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const r = await fetch(CFG.API_URL + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store' });
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 401 && ADMIN && path !== '/login') { try { localStorage.removeItem(TOKEN); } catch {} session = null; render(); }
+    if (!r.ok) throw new Error(data.error || '서버 오류 ' + r.status);
+    return data;
+  }
+  // 예전 코드 모양(sb.from(...).update(...).eq(...))을 그대로 쓰기 위한 얇은 연결부
+  const sb = { from(table) {
+    const base = table === 'pf_sites' ? '/sites' : '/photos';
+    const run = (method, path, body) => api(method, path, body).then(data => ({ data, error: null }), error => ({ data: null, error }));
+    return {
+      update: patch => ({ eq: (_k, id) => run('PATCH', `${base}/${id}`, patch) }),
+      delete: () => ({ eq: (_k, id) => run('DELETE', `${base}/${id}`) }),
+      insert: row => { const p = run('POST', base, row); return { select: () => ({ single: () => p }), then: (a, b) => p.then(a, b) }; },
+    };
+  } };
 
   document.title = ADMIN ? '포트폴리오 관리' : CFG.name;
   $('#brandName').textContent = CFG.name;
@@ -33,19 +53,13 @@
   }
   try { const c = JSON.parse(localStorage.getItem(CACHE)); if (c) { setData(c.sites, c.photos); loaded = true; } } catch {}
 
+  let version = null;
   async function fetchAll() {
-    const s = await sb.from('pf_sites').select('*').order('sort', { ascending: false });
-    if (s.error) throw s.error;
-    const photos = [];
-    for (let from = 0; ; from += 1000) {
-      const r = await sb.from('pf_photos').select('id,site_id,phase,space,t,l,w,h,src_name,src_size,created_at').order('created_at').range(from, from + 999);
-      if (r.error) throw r.error;
-      photos.push(...r.data);
-      if (r.data.length < 1000) break;
-    }
-    setData(s.data, photos);
+    const d = await api('GET', '/data');
+    version = d.v;
+    setData(d.sites, d.photos);
     loaded = true;
-    try { localStorage.setItem(CACHE, JSON.stringify({ sites: s.data, photos })); } catch {}
+    try { localStorage.setItem(CACHE, JSON.stringify({ sites: d.sites, photos: d.photos })); } catch {}
   }
   let reloadTimer = null, pendingReload = false;
   function scheduleReload() {
@@ -55,13 +69,15 @@
       try { await fetchAll(); render(); } catch (e) { console.warn(e); }
     }, 700);
   }
+  // 다른 기기에서 바꾼 내용 자동 반영: 화면이 켜져 있으면 10초마다 변경 여부 확인
+  async function checkVersion() {
+    if (document.hidden) return;
+    try { const { v } = await api('GET', '/version'); if (v !== version) scheduleReload(); } catch {}
+  }
   function subscribe() {
-    sb.channel('pf-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pf_photos' }, scheduleReload)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pf_sites' }, scheduleReload)
-      .subscribe();
-    // 탭/앱으로 돌아올 때도 새로고침 (실시간 연결이 끊겼을 때 대비)
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) scheduleReload(); });
+    setInterval(checkVersion, 10000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) checkVersion(); });
+    window.addEventListener('focus', checkVersion);
   }
 
   // ---------- 공통 ----------
@@ -302,16 +318,18 @@
   function viewLogin(msg = '') {
     app.innerHTML = `<form class="login" id="login">
       <h2>관리자 로그인</h2>
-      <p>견적 작업실과 같은 계정으로 로그인하세요.</p>
-      <input type="email" id="lgEmail" placeholder="이메일" autocomplete="username" required>
+      <p>포트폴리오 관리 비밀번호를 입력하세요.</p>
+      <input type="text" name="username" value="portfolio-admin" autocomplete="username" hidden>
       <input type="password" id="lgPw" placeholder="비밀번호" autocomplete="current-password" required>
       <button class="btn primary" type="submit">로그인</button>
       <p class="err">${esc(msg)}</p></form>`;
     $('#login').onsubmit = async e => {
       e.preventDefault();
-      const { data, error } = await sb.auth.signInWithPassword({ email: $('#lgEmail').value.trim(), password: $('#lgPw').value });
-      if (error) return viewLogin('로그인 실패: 이메일/비밀번호를 확인하세요.');
-      session = data.session;
+      let token;
+      try { ({ token } = await api('POST', '/login', { password: $('#lgPw').value })); }
+      catch (err) { return viewLogin(err.message || '로그인 실패'); }
+      try { localStorage.setItem(TOKEN, token); } catch {}
+      session = token;
       await afterLogin();
     };
   }
@@ -342,7 +360,6 @@
     act('del').onclick = async () => {
       const ps = DATA.photos.filter(p => p.site === s.id);
       if (!confirm(`"${s.name}" 현장과 사진 ${ps.length}장을 모두 삭제할까요? 되돌릴 수 없어요.`)) return;
-      await removeFiles(ps);
       const { error } = await sb.from('pf_sites').delete().eq('id', s.id);
       if (error) return toast('실패: ' + error.message);
       location.hash = '#/sites'; scheduleReload();
@@ -400,15 +417,11 @@
       if (!confirm('이 사진을 삭제할까요?')) return;
       const { error } = await sb.from('pf_photos').delete().eq('id', p.id);
       if (error) return toast('실패: ' + error.message);
-      await removeFiles([p]);
       DATA.photos = DATA.photos.filter(x => x !== p);
       lbList = lbList.filter(x => x !== p);
       render();
       if (!lbList.length) closeLB(); else { lbI = Math.min(lbI, lbList.length - 1); showLB(); }
     };
-  }
-  async function removeFiles(ps) {
-    await deleteKeys(ps.flatMap(p => [p.t, p.l]));
   }
 
   // --- 올리기 ---
@@ -492,7 +505,7 @@
       enqueue(files.map(file => ({ file, siteId, phase: up.phase, space: up.space })));
     };
     if ($('#upDir')) $('#upDir').onchange = e => planFolder([...e.target.files]);
-    $('#logout').onclick = async () => { await sb.auth.signOut(); localStorage.removeItem(CACHE); location.reload(); };
+    $('#logout').onclick = () => { try { localStorage.removeItem(TOKEN); localStorage.removeItem(CACHE); } catch {} location.reload(); };
     bindLinkBox();
     loadUsage();
   }
@@ -534,7 +547,7 @@
   }
   async function enqueue(jobs) {
     try {
-      if (!usage) { const r = await fetch(`${CFG.STORAGE_URL}/usage`, { headers: await authHeader() }); if (r.ok) usage = await r.json(); }
+      if (!usage) { const r = await fetch(`${CFG.API_URL}/usage`, { headers: await authHeader() }); if (r.ok) usage = await r.json(); }
       if (usage && usage.bytes + jobs.length * 700000 > usage.limit) return toast("저장공간(10GB)이 꽉 차서 더 올릴 수 없어요. 안 쓰는 사진을 지워주세요.", 5000);
     } catch {}
     if (queue.done + queue.failed.length >= queue.total) { queue.total = 0; queue.done = 0; queue.failed = []; }
@@ -562,8 +575,8 @@
     catch { URL.revokeObjectURL(url); throw new Error('이미지를 열 수 없음'); }
     const large = await toJpeg(img, 2000, 0.85), thumb = await toJpeg(img, 900, 0.8);
     URL.revokeObjectURL(url);
-    const id = crypto.randomUUID(), uid = session.user.id;
-    const t = `${uid}/${id}_t.jpg`, l = `${uid}/${id}_l.jpg`;
+    const id = crypto.randomUUID();
+    const t = `ph/${id}_t.jpg`, l = `ph/${id}_l.jpg`;
     await putFile(t, thumb.blob);
     try { await putFile(l, large.blob); } catch (e) { await deleteKeys([t]); throw e; }
     const ins = await sb.from('pf_photos').insert({ id, site_id: siteId, phase, space, t, l, w: thumb.w, h: thumb.h, src_name: file.name, src_size: file.size });
@@ -571,24 +584,21 @@
     usage = null;
   }
   // --- 사진 저장소 (Cloudflare R2 Worker) ---
-  async function authHeader() {
-    const { data } = await sb.auth.getSession();
-    return { Authorization: 'Bearer ' + data.session.access_token };
-  }
+  async function authHeader() { return { Authorization: 'Bearer ' + getToken() }; }
   async function putFile(key, blob) {
-    const r = await fetch(`${CFG.STORAGE_URL}/p/${key}`, { method: 'PUT', headers: { ...(await authHeader()), 'Content-Type': 'image/jpeg' }, body: blob });
+    const r = await fetch(`${CFG.API_URL}/p/${key}`, { method: 'PUT', headers: { ...(await authHeader()), 'Content-Type': 'image/jpeg' }, body: blob });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || '업로드 실패 ' + r.status);
   }
   async function deleteKeys(keys) {
     if (!keys.length) return;
-    await fetch(`${CFG.STORAGE_URL}/delete`, { method: 'POST', headers: { ...(await authHeader()), 'Content-Type': 'application/json' }, body: JSON.stringify({ keys }) }).catch(() => {});
+    await fetch(`${CFG.API_URL}/delete`, { method: 'POST', headers: { ...(await authHeader()), 'Content-Type': 'application/json' }, body: JSON.stringify({ keys }) }).catch(() => {});
     usage = null;
   }
   let usage = null;
   async function loadUsage() {
     const el = $('#usage'); if (!el) return;
     try {
-      if (!usage) { const r = await fetch(`${CFG.STORAGE_URL}/usage`, { headers: await authHeader() }); if (!r.ok) throw 0; usage = await r.json(); }
+      if (!usage) { const r = await fetch(`${CFG.API_URL}/usage`, { headers: await authHeader() }); if (!r.ok) throw 0; usage = await r.json(); }
       const pct = Math.min(100, usage.bytes / usage.limit * 100);
       const fmt = b => b >= 1073741824 ? (b / 1073741824).toFixed(2) + 'GB' : Math.round(b / 1048576) + 'MB';
       el.innerHTML = `<div class="usage ${pct >= 80 ? 'warn' : ''}"><div><b>저장공간</b><span>${fmt(usage.bytes)} / ${fmt(usage.limit)} · 사진 ${Math.round(usage.count / 2)}장</span></div>
@@ -679,7 +689,7 @@
   async function afterLogin() {
     app.innerHTML = '<p class="none">불러오는 중…</p>';
     try { await fetchAll(); }
-    catch (e) { app.innerHTML = `<div class="empty"><h2>서버 연결 문제</h2><p>${esc(e.message)}</p><p>Supabase에 <b>supabase.sql</b>을 실행했는지 확인하세요.</p></div>`; return; }
+    catch (e) { app.innerHTML = `<div class="empty"><h2>서버 연결 문제</h2><p>${esc(e.message)}</p><p>인터넷 연결을 확인하고 다시 열어보세요.</p></div>`; return; }
     subscribe();
     render();
   }
@@ -715,9 +725,7 @@
   // ---------- 시작 ----------
   (async () => {
     if (ADMIN) {
-      const { data } = await sb.auth.getSession();
-      session = data.session;
-      sb.auth.onAuthStateChange((_e, s) => { session = s; });
+      session = getToken();
       if (!session) return render();
       if (loaded) render();
       return afterLogin();
