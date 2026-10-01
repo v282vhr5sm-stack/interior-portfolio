@@ -242,3 +242,25 @@ button.chip { cursor: pointer; }
 .usage i { display: block; height: 6px; background: var(--chip); border-radius: 3px; overflow: hidden; }
 .usage i b { display: block; height: 100%; background: var(--accent); }
 .usage.warn i b { background: #b3261e; }
+
+/* 캡쳐 / 자르기 */
+.capture-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.panel label.chk { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--ink); font-size: 14px; cursor: pointer; }
+.panel label.chk input { width: 18px; height: 18px; margin: 0; display: inline-block; }
+.help.small { font-size: 12.5px; margin: 8px 0 0; }
+.pastebox { margin-top: 12px; border: 2px dashed var(--line); border-radius: 12px; padding: 18px 14px; text-align: center; background: var(--bg); display: flex; flex-direction: column; gap: 6px; outline: none; -webkit-user-select: text; user-select: text; caret-color: transparent; }
+.pastebox:focus { border-color: var(--accent); background: #fbf8f3; }
+.pastebox > b { font-size: 16px; }
+.pastebox small { color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+.crop { position: fixed; inset: 0; z-index: 150; background: #17150f; color: #fff; display: flex; flex-direction: column; }
+.crop-top { padding: calc(12px + env(safe-area-inset-top)) 16px 10px; display: flex; flex-direction: column; gap: 2px; }
+.crop-top b { font-size: 15px; }
+.crop-top span { font-size: 12px; color: #b9b2a6; }
+.crop-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 8px 16px; }
+.crop-wrap { position: relative; line-height: 0; touch-action: none; cursor: crosshair; overflow: hidden; max-width: 100%; max-height: 100%; }
+.crop-wrap img { max-width: calc(100vw - 32px); max-height: calc(100vh - 170px); user-select: none; -webkit-user-drag: none; pointer-events: none; }
+.crop-box { position: absolute; border: 2px solid #fff; box-shadow: 0 0 0 9999px rgba(0,0,0,.55); pointer-events: none; }
+.crop-bar { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; padding: 12px 16px calc(14px + env(safe-area-inset-bottom)); }
+.crop-bar .btn { background: rgba(255,255,255,.1); color: #fff; border-color: rgba(255,255,255,.2); }
+.crop-bar .btn.primary { background: #fff; color: var(--ink); border-color: #fff; }
+.crop-bar .btn:disabled { opacity: .4; }

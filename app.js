@@ -470,6 +470,15 @@
             <input type="file" id="upFiles" accept="image/*" multiple hidden>
             <b>4. 사진 선택</b><small id="pickHint">${pickHint()}</small>
           </label>
+          <div class="capture-row">
+            ${canCapture ? '<button type="button" class="btn" id="capBtn">✂ 화면 캡쳐해서 올리기</button>' : ''}
+            <label class="chk"><input type="checkbox" id="cropToggle" ${up.crop ? 'checked' : ''}> 고른 사진을 잘라서 올리기</label>
+          </div>
+          ${canCapture ? '<p class="help small">캡쳐 도구(Win+Shift+S)로 찍은 다음 이 화면에서 Ctrl+V 해도 바로 잘라서 올릴 수 있어요.</p>' : `
+          <div class="pastebox" id="pasteBox" contenteditable="true" inputmode="none" spellcheck="false">
+            <b>📋 캡쳐 붙여넣기</b>
+            <small>스크린샷 → 왼쪽 아래 미리보기 → 완료 → <b>복사 후 삭제</b><br>그다음 여기를 <b>길게 눌러 「붙여넣기」</b> (사진첩에 안 남아요)</small>
+          </div>`}
           ${queueHTML()}
         </section>
 
@@ -504,15 +513,126 @@
     $('#upFiles').onchange = async e => {
       const files = [...e.target.files]; e.target.value = '';
       if (!files.length) return;
+      if (up.crop) return cropAndUpload(files);
       const siteId = await resolveSite();
       if (siteId === undefined) return;
       enqueue(files.map(file => ({ file, siteId, phase: up.phase, space: up.space })));
+    };
+    $('#cropToggle').onchange = e => { up.crop = e.target.checked; };
+    if ($('#pasteBox')) {
+      const pb = $('#pasteBox'), html = pb.innerHTML;
+      pb.addEventListener('beforeinput', e => e.preventDefault()); // 글자 입력 막기
+      pb.addEventListener('input', () => { pb.innerHTML = html; });
+      pb.addEventListener('focus', () => { if (!ready()) { toast(pickHint()); pb.blur(); } });
+    }
+    if ($('#capBtn')) $('#capBtn').onclick = async () => {
+      if (!ready()) return toast(pickHint());
+      let blob;
+      try { blob = await captureScreen(); } catch (err) { if (err && err.name !== 'NotAllowedError') toast('캡쳐를 못 했어요: ' + (err.message || err)); return; }
+      cropAndUpload([new File([blob], capName(), { type: 'image/png' })], true);
     };
     if ($('#upDir')) $('#upDir').onchange = e => planFolder([...e.target.files]);
     $('#logout').onclick = () => { try { localStorage.removeItem(TOKEN); localStorage.removeItem(CACHE); } catch {} location.reload(); };
     bindLinkBox();
     loadUsage();
   }
+  // --- 화면 캡쳐 / 잘라서 올리기 ---
+  const canCapture = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) && !matchMedia('(hover: none)').matches;
+  const capName = () => { const d = new Date(), z = n => String(n).padStart(2, '0'); return `캡쳐_${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}.png`; };
+  async function captureScreen() {
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'window' }, audio: false, selfBrowserSurface: 'exclude', preferCurrentTab: false });
+    try {
+      const v = document.createElement('video');
+      v.srcObject = stream; v.muted = true; v.playsInline = true;
+      await v.play();
+      await new Promise(r => setTimeout(r, 500)); // 화면이 다 그려질 때까지 잠깐
+      const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
+      c.getContext('2d').drawImage(v, 0, 0);
+      return await new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('캡쳐 실패')), 'image/png'));
+    } finally { stream.getTracks().forEach(t => t.stop()); window.focus(); }
+  }
+  // 이미지에서 드래그로 영역 고르기 → 잘린 File (취소하면 null)
+  function openCropper(file, opts = {}) {
+    return new Promise(resolve => {
+      const url = URL.createObjectURL(file);
+      const el = document.createElement('div');
+      el.className = 'crop';
+      el.innerHTML = `<div class="crop-top"><b>${opts.title || '올릴 부분을 드래그해서 고르세요'}</b><span>${esc(pickHint())}</span></div>
+        <div class="crop-stage"><div class="crop-wrap"><img alt="" draggable="false"><div class="crop-box" hidden></div></div></div>
+        <div class="crop-bar">
+          <button class="btn" data-c="cancel">${opts.multi ? '이 사진 건너뛰기' : '취소'}</button>
+          <button class="btn" data-c="reset" hidden>다시 고르기</button>
+          <button class="btn" data-c="all">전체 올리기</button>
+          <button class="btn primary" data-c="ok" disabled>선택한 부분 올리기</button>
+        </div>`;
+      document.body.appendChild(el);
+      document.body.style.overflow = 'hidden';
+      const img = el.querySelector('img'), wrap = el.querySelector('.crop-wrap'), box = el.querySelector('.crop-box');
+      const btn = k => el.querySelector(`[data-c="${k}"]`);
+      img.src = url;
+      let sel = null, start = null;
+      const pt = e => { const r = img.getBoundingClientRect(); return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) }; };
+      const draw = () => {
+        box.hidden = !sel;
+        btn('ok').disabled = !sel || start; btn('reset').hidden = !sel;
+        if (sel) Object.assign(box.style, { left: sel.x * 100 + '%', top: sel.y * 100 + '%', width: sel.w * 100 + '%', height: sel.h * 100 + '%' });
+      };
+      wrap.onpointerdown = e => { e.preventDefault(); wrap.setPointerCapture(e.pointerId); start = pt(e); sel = { x: start.x, y: start.y, w: 0, h: 0 }; draw(); };
+      wrap.onpointermove = e => {
+        if (!start) return;
+        const p = pt(e);
+        sel = { x: Math.min(start.x, p.x), y: Math.min(start.y, p.y), w: Math.abs(p.x - start.x), h: Math.abs(p.y - start.y) };
+        draw();
+      };
+      wrap.onpointerup = wrap.onpointercancel = () => {
+        start = null;
+        if (sel && (sel.w * img.naturalWidth < 20 || sel.h * img.naturalHeight < 20)) sel = null;
+        draw();
+      };
+      const done = async result => {
+        el.remove(); document.body.style.overflow = ''; URL.revokeObjectURL(url);
+        resolve(result);
+      };
+      const cut = s => new Promise(res => {
+        const W = img.naturalWidth, H = img.naturalHeight;
+        const sx = Math.round(s.x * W), sy = Math.round(s.y * H), sw = Math.max(1, Math.round(s.w * W)), sh = Math.max(1, Math.round(s.h * H));
+        const c = document.createElement('canvas'); c.width = sw; c.height = sh;
+        c.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+        c.toBlob(b => res(new File([b], file.name.replace(/\.\w+$/, '') + '_잘라냄.png', { type: 'image/png' })), 'image/png');
+      });
+      btn('cancel').onclick = () => done(null);
+      btn('reset').onclick = () => { sel = null; draw(); };
+      btn('all').onclick = () => done(file);
+      btn('ok').onclick = async () => done(await cut(sel));
+      img.onerror = () => { toast('이 사진은 열 수 없어요'); done(null); };
+    });
+  }
+  async function cropAndUpload(files, isCapture) {
+    if (!ready()) return toast(pickHint());
+    const siteId = await resolveSite();
+    if (siteId === undefined) return;
+    const target = { siteId, phase: up.phase, space: up.space };
+    for (let i = 0; i < files.length; i++) {
+      const f = await openCropper(files[i], {
+        multi: files.length > 1,
+        title: isCapture ? '캡쳐한 화면에서 올릴 부분을 드래그하세요' : files.length > 1 ? `${i + 1} / ${files.length} — 올릴 부분을 드래그하세요` : '',
+      });
+      if (f) enqueue([{ file: f, ...target }]);
+    }
+  }
+  // 캡쳐 도구로 찍은 걸 Ctrl+V 하면 바로 자르기 화면
+  document.addEventListener('paste', e => {
+    if (!ADMIN || !location.hash.startsWith('#/upload') || /INPUT|TEXTAREA/.test(e.target.tagName) || document.querySelector('.crop')) return;
+    const inBox = e.target.closest && e.target.closest('#pasteBox');
+    const item = [...(e.clipboardData?.items || [])].find(i => i.kind === 'file' && i.type.startsWith('image/'));
+    if (inBox) e.preventDefault();
+    if (!item) { if (inBox) toast('복사된 사진이 없어요. 스크린샷에서 「복사 후 삭제」를 먼저 눌러주세요.', 4000); return; }
+    e.preventDefault();
+    if (inBox) e.target.closest('#pasteBox').blur();
+    const blob = item.getAsFile();
+    cropAndUpload([new File([blob], capName(), { type: blob.type || 'image/png' })], true);
+  });
+
   function ready() { return up.site && (up.site !== '__new' || up.newName.trim()) && up.space; }
   function pickHint() {
     if (!up.site) return '먼저 현장을 고르세요';
