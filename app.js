@@ -829,10 +829,13 @@
     if (ADMIN && !session) return viewLogin();
     if (!loaded) return;
     if (route === 'upload' && ADMIN) return viewUpload(new URLSearchParams(qs || ''));
+    if (!ADMIN) {
+      // 고객 링크는 현장별로만 보기
+      if (!DATA.photos.length) return app.innerHTML = '<p class="none">준비 중이에요.</p>';
+      return route === 'site' ? viewSite(arg) : viewSites();
+    }
     if (!DATA.photos.length && route !== 'site' && route !== 'sites')
-      return app.innerHTML = ADMIN
-        ? `<div class="empty"><h2>아직 사진이 없어요</h2><p>위의 <b>＋ 올리기</b>에서 사진을 올려보세요. 노트북·아이폰·아이패드 어디서 올려도 바로 반영돼요.</p><a class="btn primary" href="#/upload">사진 올리러 가기</a></div>`
-        : '<p class="none">준비 중이에요.</p>';
+      return app.innerHTML = `<div class="empty"><h2>아직 사진이 없어요</h2><p>위의 <b>＋ 올리기</b>에서 사진을 올려보세요. 노트북·아이폰·아이패드 어디서 올려도 바로 반영돼요.</p><a class="btn primary" href="#/upload">사진 올리러 가기</a></div>`;
     if (route === 'sites') viewSites();
     else if (route === 'site') viewSite(arg);
     else viewSpaces(route === 'space' ? arg : null);
