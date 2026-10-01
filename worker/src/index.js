@@ -62,6 +62,9 @@ export default {
       // ---------- 관리자 ----------
       if (!admin) return json({ error: '로그인이 필요해요' }, 401);
 
+      // 쓰고 있는 동안엔 로그인 연장 (새 토큰 발급)
+      if (req.method === 'POST' && path === '/refresh') return json({ token: await makeToken(env) });
+
       if (req.method === 'PUT' && path.startsWith('/p/')) {
         const key = decodeURIComponent(path.slice(3));
         if (!/^ph\/[\w-]+\.jpg$/.test(key)) return json({ error: '잘못된 경로' }, 403);
