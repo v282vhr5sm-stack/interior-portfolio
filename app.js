@@ -57,6 +57,10 @@
   async function fetchAll() {
     const d = await api('GET', '/data');
     version = d.v;
+    // 로그인한 지 7일 넘었으면 조용히 연장 → 180일 안에 한 번이라도 열면 계속 로그인 유지
+    const tk = getToken(), exp = tk ? +tk.split('.')[0] : 0;
+    if (ADMIN && d.admin && exp && exp - Date.now() < 173 * 86400000)
+      api('POST', '/refresh').then(r => { try { localStorage.setItem(TOKEN, r.token); } catch {} }).catch(() => {});
     setData(d.sites, d.photos);
     loaded = true;
     try { localStorage.setItem(CACHE, JSON.stringify({ sites: d.sites, photos: d.photos })); } catch {}
