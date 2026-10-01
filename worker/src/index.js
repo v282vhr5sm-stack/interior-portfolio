@@ -10,6 +10,7 @@
 //  POST /sites, PATCH|DELETE /sites/<id>
 //  POST /photos, PATCH|DELETE /photos/<id>
 const MAX_BYTES = 8 * 1024 * 1024;
+const MAX_VIDEO = 95 * 1024 * 1024; // 무료 요금제는 요청 하나에 100MB까지
 const TOKEN_DAYS = 180;
 const SITE_FIELDS = ['name', 'info', 'hidden', 'cover', 'sort'];
 const PHOTO_FIELDS = ['site_id', 'phase', 'space'];
@@ -23,7 +24,7 @@ export default {
     const cors = {
       'Access-Control-Allow-Origin': allowed.includes(origin) ? origin : allowed[0],
       'Access-Control-Allow-Methods': 'GET, PUT, POST, PATCH, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+      'Access-Control-Allow-Headers': 'Authorization, Content-Type, Range',
       'Access-Control-Max-Age': '86400',
       Vary: 'Origin',
     };
@@ -32,10 +33,23 @@ export default {
 
     try {
       // ---------- 공개 ----------
-      if (req.method === 'GET' && path.startsWith('/p/')) {
-        const obj = await env.BUCKET.get(decodeURIComponent(path.slice(3)));
-        if (!obj) return new Response('not found', { status: 404, headers: cors });
-        return new Response(obj.body, { headers: { ...cors, 'Content-Type': obj.httpMetadata?.contentType || 'image/jpeg', 'Cache-Control': 'public, max-age=31536000, immutable', ETag: obj.httpEtag } });
+      if ((req.method === 'GET' || req.method === 'HEAD') && path.startsWith('/p/')) {
+        const key = decodeURIComponent(path.slice(3));
+        // 동영상은 구간 요청(Range)을 받아야 아이폰에서 재생·건너뛰기가 됨
+        const rm = (req.headers.get('Range') || '').match(/^bytes=(\d*)-(\d*)$/);
+        const head = await env.BUCKET.head(key);
+        if (!head) return new Response('not found', { status: 404, headers: cors });
+        const size = head.size;
+        const base = { ...cors, 'Content-Type': head.httpMetadata?.contentType || 'image/jpeg', 'Cache-Control': 'public, max-age=31536000, immutable', ETag: head.httpEtag, 'Accept-Ranges': 'bytes', 'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges' };
+        if (rm && (rm[1] || rm[2])) {
+          let start = rm[1] ? +rm[1] : Math.max(0, size - +rm[2]);
+          let end = rm[1] && rm[2] ? Math.min(+rm[2], size - 1) : size - 1;
+          if (start >= size || start > end) return new Response(null, { status: 416, headers: { ...base, 'Content-Range': `bytes */${size}` } });
+          const obj = req.method === 'HEAD' ? null : await env.BUCKET.get(key, { range: { offset: start, length: end - start + 1 } });
+          return new Response(obj && obj.body, { status: 206, headers: { ...base, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': String(end - start + 1) } });
+        }
+        const obj = req.method === 'HEAD' ? null : await env.BUCKET.get(key);
+        return new Response(obj && obj.body, { headers: { ...base, 'Content-Length': String(size) } });
       }
       const admin = await isAdmin(req, env);
 
@@ -67,6 +81,18 @@ export default {
 
       if (req.method === 'PUT' && path.startsWith('/p/')) {
         const key = decodeURIComponent(path.slice(3));
+        // 동영상 (mp4/mov): 메모리를 안 쓰게 그대로 흘려서 저장 → 저장 후 파일 앞부분 확인
+        if (/^ph\/[\w-]+_v\.mp4$/.test(key)) {
+          const len = +req.headers.get('Content-Length') || 0;
+          if (!len) return json({ error: '파일 크기를 알 수 없어요' }, 411);
+          if (len > MAX_VIDEO) return json({ error: `동영상이 너무 커요 (최대 ${Math.round(MAX_VIDEO / 1048576)}MB)` }, 413);
+          await env.BUCKET.put(key, req.body, { httpMetadata: { contentType: 'video/mp4' } });
+          const top = await env.BUCKET.get(key, { range: { offset: 0, length: 12 } });
+          const b = new Uint8Array(await top.arrayBuffer());
+          const box = String.fromCharCode(...b.slice(4, 8));
+          if (!['ftyp', 'moov', 'mdat', 'wide', 'free', 'skip'].includes(box)) { await env.BUCKET.delete(key); return json({ error: 'MP4 동영상만 올릴 수 있어요' }, 415); }
+          return json({ ok: true, key });
+        }
         if (!/^ph\/[\w-]+\.jpg$/.test(key)) return json({ error: '잘못된 경로' }, 403);
         if ((+req.headers.get('Content-Length') || 0) > MAX_BYTES) return json({ error: '파일이 너무 커요' }, 413);
         const buf = await req.arrayBuffer();
@@ -104,7 +130,7 @@ export default {
             await touch(env);
             return json(siteOut(row));
           }
-          const row = { id: b.id || crypto.randomUUID(), site_id: b.site_id || null, phase: ['before', 'during', 'after'].includes(b.phase) ? b.phase : 'after', space: String(b.space || '기타'), t: b.t, l: b.l, w: b.w | 0, h: b.h | 0, src_name: b.src_name || null, src_size: b.src_size || null, created_at: now };
+          const row = { id: b.id || crypto.randomUUID(), site_id: b.site_id || null, phase: ['before', 'during', 'after'].includes(b.phase) ? b.phase : 'after', space: String(b.space || '기타'), t: b.t, l: b.l, w: b.w | 0, h: b.h | 0, src_name: b.src_name || null, src_size: b.src_size || null, type: b.type === 'video' ? 'video' : 'image', created_at: now };
           if (!/^ph\//.test(row.t) || !/^ph\//.test(row.l)) return json({ error: '잘못된 경로' }, 400);
           await insert(env, 'photos', row);
           await touch(env);

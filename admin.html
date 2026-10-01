@@ -31,10 +31,11 @@
   <button class="lb-x" id="lbClose" aria-label="닫기">✕</button>
   <button class="lb-nav prev" id="lbPrev" aria-label="이전">‹</button>
   <figure class="lb-fig">
-    <div class="lb-img"><img id="lbImg" alt=""></div>
+    <div class="lb-img"><img id="lbImg" alt=""><video id="lbVid" controls playsinline preload="metadata" controlslist="nodownload noplaybackrate noremoteplayback" disablepictureinpicture disableremoteplayback hidden></video></div>
     <figcaption>
       <span id="lbCap"></span>
       <a id="lbSite" href="#">이 현장 전체 보기 →</a>
+      <span class="lb-zoom" id="lbZoom" hidden><button type="button" id="zOut" aria-label="축소">−</button><span id="zPct">100%</span><button type="button" id="zIn" aria-label="확대">+</button></span>
       <span class="lb-n" id="lbN"></span>
     </figcaption>
     <div id="lbEdit"></div>

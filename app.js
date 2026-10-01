@@ -97,13 +97,15 @@
     const badge = p.phase !== 'after' && !opts.noBadge ? `<span class="badge ${p.phase}">${PH_NAME[p.phase]}</span>` : '';
     const cover = ADMIN && s.cover === p.id ? '<span class="badge cover">대표</span>' : '';
     const del = ADMIN ? '<button class="ph-del" type="button" aria-label="삭제" title="삭제">×</button>' : '';
-    return `<figure class="ph" data-i="${idx}"${ratio}>${badge}${cover}${del}
+    const play = p.type === 'video' ? '<span class="play" aria-label="동영상">▶</span>' : '';
+    return `<figure class="ph" data-i="${idx}"${ratio}>${badge}${cover}${del}${play}
       <img src="${imgUrl(p.t)}" loading="lazy" alt="" draggable="false">
       ${opts.noCap ? '' : `<figcaption class="cap">${esc(p.space)} · ${esc(s.name)}</figcaption>`}</figure>`;
   };
   const coverOf = id => {
     const ps = DATA.photos.filter(p => p.site === id), s = siteById[id];
-    return ps.find(p => p.id === s.cover) || ps.find(p => p.phase === 'after' && p.space === '거실') || ps.find(p => p.phase === 'after') || ps[0];
+    const img = ps.filter(p => p.type !== 'video');
+    return ps.find(p => p.id === s.cover) || img.find(p => p.phase === 'after' && p.space === '거실') || img.find(p => p.phase === 'after') || img[0] || ps[0];
   };
 
   // ---------- 공간별 ----------
@@ -187,7 +189,7 @@
     app.innerHTML = `
       <a class="back" href="#/sites">← 현장 목록</a>
       <div class="site-head">
-        <div class="hero" id="hero">${c ? `<img src="${imgUrl(c.l)}" alt="" draggable="false">` : ''}</div>
+        <div class="hero" id="hero">${c ? `<img src="${imgUrl(c.type === 'video' ? c.t : c.l)}" alt="" draggable="false">` : ''}</div>
         <div>
           <h1>${esc(s.name)} ${ADMIN && s.hidden ? '<span class="badge hid">고객에게 숨김</span>' : ''}</h1>
           ${info.length ? `<dl class="info">${info.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : ''}
@@ -229,17 +231,22 @@
   function closeLB() {
     if ($('#lb').hidden) return;
     $('#lb').hidden = true; document.body.style.overflow = '';
+    const vid = $('#lbVid'); vid.pause(); vid.removeAttribute('src'); vid.dataset.src = ''; vid.load();
     if (pendingReload) { pendingReload = false; scheduleReload(); }
   }
   function showLB() {
     const p = lbList[lbI], s = siteById[p.site];
     if (!p || !s) return closeLB();
-    $('#lbImg').src = imgUrl(p.l);
+    const vid = $('#lbVid'), isVid = p.type === 'video';
+    $('#lbImg').hidden = isVid; vid.hidden = !isVid;
+    if (isVid) { if (vid.dataset.src !== p.l) { vid.dataset.src = p.l; vid.poster = imgUrl(p.t); vid.src = imgUrl(p.l); } }
+    else { vid.pause(); vid.removeAttribute('src'); vid.dataset.src = ''; vid.load(); $('#lbImg').src = imgUrl(p.l); }
+    zReset();
     $('#lbCap').textContent = `${s.name} · ${p.space} · ${PH_NAME[p.phase]}`;
     $('#lbSite').href = '#/site/' + s.id;
     $('#lbSite').hidden = location.hash === '#/site/' + s.id;
     $('#lbN').textContent = `${lbI + 1} / ${lbList.length}`;
-    [lbList[lbI + 1], lbList[lbI - 1]].forEach(n => n && (new Image().src = imgUrl(n.l)));
+    [lbList[lbI + 1], lbList[lbI - 1]].forEach(n => n && n.type !== 'video' && (new Image().src = imgUrl(n.l)));
     if (ADMIN) lbEditor(p);
   }
   const step = d => { lbI = (lbI + d + lbList.length) % lbList.length; showLB(); };
@@ -253,14 +260,100 @@
     if (e.key === 'Escape') closeLB();
     if (e.key === 'ArrowLeft') step(-1);
     if (e.key === 'ArrowRight') step(1);
+    if (e.key === '+' || e.key === '=') zSet(Z.s * 1.4);
+    if (e.key === '-') zSet(Z.s / 1.4);
   });
   let tx = null;
-  $('#lb').addEventListener('touchstart', e => tx = e.touches[0].clientX, { passive: true });
+  // 넘기기(스와이프): 동영상 위, 두 손가락, 확대 중에는 안 함
+  $('#lb').addEventListener('touchstart', e => { tx = e.target.tagName === 'VIDEO' || e.touches.length > 1 || Z.s > 1.01 ? null : e.touches[0].clientX; }, { passive: true });
   $('#lb').addEventListener('touchend', e => {
-    if (tx == null) return;
+    if (tx == null || Z.s > 1.01) { tx = null; return; }
     const dx = e.changedTouches[0].clientX - tx; tx = null;
     if (Math.abs(dx) > 50) step(dx < 0 ? 1 : -1);
   });
+
+  // ---------- 사진 확대/축소 + 드래그 ----------
+  // 최대 배율 = 사진 원래 크기까지 (그 이상은 깨져 보이므로 막음)
+  const Z = { s: 1, x: 0, y: 0, max: 1, pts: new Map(), last: null, pinch: null, moved: false, tap: 0, tapX: 0, tapY: 0 };
+  const zBox = $('.lb-img'), zImg = $('#lbImg');
+  zImg.draggable = false;
+  function zApply() {
+    const w = zBox.clientWidth, h = zBox.clientHeight;
+    Z.x = Math.min(0, Math.max(w - w * Z.s, Z.x));
+    Z.y = Math.min(0, Math.max(h - h * Z.s, Z.y));
+    zImg.style.transform = Z.s <= 1.001 ? '' : `translate(${Z.x}px, ${Z.y}px) scale(${Z.s})`;
+    zBox.classList.toggle('zoomed', Z.s > 1.001);
+    $('#zPct').textContent = Math.round(Z.s * 100) + '%';
+    $('#zIn').disabled = Z.s >= Z.max - 0.001;
+    $('#zOut').disabled = Z.s <= 1.001;
+  }
+  function zSet(s, px, py) { // (px, py) 지점을 중심으로 확대
+    if (Z.max <= 1) return;
+    if (px == null) { px = zBox.clientWidth / 2; py = zBox.clientHeight / 2; }
+    s = Math.min(Z.max, Math.max(1, s));
+    const ux = (px - Z.x) / Z.s, uy = (py - Z.y) / Z.s;
+    Z.s = s; Z.x = px - ux * s; Z.y = py - uy * s;
+    zApply();
+  }
+  function zReset() {
+    Z.s = 1; Z.x = 0; Z.y = 0; Z.pts.clear(); Z.pinch = null; Z.last = null;
+    const calc = () => {
+      Z.max = zImg.hidden || !zImg.clientWidth ? 1 : Math.max(1, zImg.naturalWidth / zImg.clientWidth);
+      $('#lbZoom').hidden = Z.max < 1.15;
+      zApply();
+    };
+    $('#lbZoom').hidden = true;
+    if (zImg.complete && zImg.naturalWidth) calc(); else zImg.onload = calc;
+  }
+  const boxPt = (x, y) => { const r = zBox.getBoundingClientRect(); return [x - r.left, y - r.top]; };
+  zBox.addEventListener('wheel', e => {
+    if ($('#lb').hidden || Z.max <= 1) return;
+    e.preventDefault();
+    zSet(Z.s * Math.exp(-e.deltaY * 0.0018), ...boxPt(e.clientX, e.clientY));
+  }, { passive: false });
+  zBox.addEventListener('pointerdown', e => {
+    if (Z.max <= 1 || e.target.tagName === 'VIDEO') return;
+    zBox.setPointerCapture(e.pointerId);
+    Z.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    Z.moved = false;
+    if (Z.pts.size === 2) { const [a, b] = [...Z.pts.values()]; Z.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, s: Z.s }; }
+    else Z.last = { x: e.clientX, y: e.clientY };
+    if (Z.s > 1.001) zBox.classList.add('dragging');
+  });
+  zBox.addEventListener('pointermove', e => {
+    if (!Z.pts.has(e.pointerId)) return;
+    Z.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (Z.pts.size >= 2 && Z.pinch) {
+      const [a, b] = [...Z.pts.values()];
+      zSet(Z.pinch.s * Math.hypot(a.x - b.x, a.y - b.y) / Z.pinch.d, ...boxPt((a.x + b.x) / 2, (a.y + b.y) / 2));
+      Z.moved = true;
+    } else if (Z.last) {
+      const dx = e.clientX - Z.last.x, dy = e.clientY - Z.last.y;
+      if (Math.abs(dx) + Math.abs(dy) > 3) Z.moved = true;
+      if (Z.s > 1.001) { Z.x += dx; Z.y += dy; zApply(); }
+      Z.last = { x: e.clientX, y: e.clientY };
+    }
+  });
+  const zUp = e => {
+    if (!Z.pts.has(e.pointerId)) return;
+    Z.pts.delete(e.pointerId);
+    if (Z.pts.size < 2) Z.pinch = null;
+    if (Z.pts.size === 1) { const [a] = Z.pts.values(); Z.last = { x: a.x, y: a.y }; } else Z.last = null;
+    zBox.classList.remove('dragging');
+    // 두 번 톡톡(더블클릭) → 확대 / 원래대로
+    if (e.type === 'pointerup' && !Z.moved && !Z.pts.size) {
+      const now = Date.now();
+      if (now - Z.tap < 320 && Math.abs(e.clientX - Z.tapX) < 30 && Math.abs(e.clientY - Z.tapY) < 30) {
+        Z.tap = 0;
+        zSet(Z.s > 1.01 ? 1 : Math.min(Z.max, 2.5), ...boxPt(e.clientX, e.clientY));
+      } else { Z.tap = now; Z.tapX = e.clientX; Z.tapY = e.clientY; }
+    }
+  };
+  zBox.addEventListener('pointerup', zUp);
+  zBox.addEventListener('pointercancel', zUp);
+  $('#zIn').onclick = e => { e.stopPropagation(); zSet(Z.s * 1.5); };
+  $('#zOut').onclick = e => { e.stopPropagation(); zSet(Z.s / 1.5); };
+  window.addEventListener('resize', () => { if (!$('#lb').hidden) zReset(); });
 
   // ---------- 고객 링크: 저장/캡처 방지 ----------
   if (!ADMIN) {
@@ -443,7 +536,18 @@
 
   // --- 올리기 ---
   // 진짜 JPEG/PNG인지 파일 앞부분으로 확인 (JPEG: FF D8 FF, PNG: 89 50 4E 47) — 확장자만 바꾼 다른 파일 걸러내기
-  const isPhoto = async f => { try { const b = new Uint8Array(await f.slice(0, 4).arrayBuffer()); return (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) || (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47); } catch { return false; } };
+  // DNG: TIFF 머리(II*\0 / MM\0*), MP4/MOV: 4~8번째 글자가 ftyp 등
+  const isPhoto = async f => {
+    try {
+      const b = new Uint8Array(await f.slice(0, 12).arrayBuffer());
+      const box = String.fromCharCode(...b.slice(4, 8));
+      return (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) ||
+        (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) ||
+        (b[0] === 0x49 && b[1] === 0x49 && b[2] === 0x2A && b[3] === 0) || (b[0] === 0x4D && b[1] === 0x4D && b[2] === 0 && b[3] === 0x2A) ||
+        ['ftyp', 'moov', 'mdat', 'wide', 'free', 'skip'].includes(box);
+    } catch { return false; }
+  };
+  const OK_EXT = /\.(jpe?g|png|dng|mp4|mov|m4v)$/i;
   const PHASE_RE = [
     ['before', /^(공사\s*전|시공\s*전|전|before|비포)$/i],
     ['during', /^(공사\s*중|시공\s*중|중|during|진행)$/i],
@@ -481,7 +585,7 @@
             </div>
           </div>
           <label class="pick ${ready() ? '' : 'off'}" id="pickLbl">
-            <input type="file" id="upFiles" accept="image/*" multiple hidden>
+            <input type="file" id="upFiles" accept="image/*,video/mp4,video/quicktime,.dng,.mp4,.mov" multiple hidden>
             <b>4. 사진 선택</b><small id="pickHint">${pickHint()}</small>
           </label>
           <div class="capture-row">
@@ -627,7 +731,13 @@
     if (siteId === undefined) return;
     const target = { siteId, phase: up.phase, space: up.space };
     for (let i = 0; i < files.length; i++) {
-      const f = await openCropper(files[i], {
+      let src = files[i];
+      if (isVideoFile(src)) { enqueue([{ file: src, ...target }]); continue; } // 동영상은 자르지 않고 그대로
+      if (isDng(src)) {
+        try { const img = await dngPreview(src); const j = await toJpeg(img, 4000, 0.92); src = new File([j.blob], src.name.replace(/\.dng$/i, '.jpg'), { type: 'image/jpeg' }); }
+        catch (e) { toast(src.name + ': ' + e.message); continue; }
+      }
+      const f = await openCropper(src, {
         multi: files.length > 1,
         title: isCapture ? '캡쳐한 화면에서 올릴 부분을 드래그하세요' : files.length > 1 ? `${i + 1} / ${files.length} — 올릴 부분을 드래그하세요` : '',
       });
@@ -686,7 +796,8 @@
   async function enqueue(jobs) {
     try {
       if (!usage) { const r = await fetch(`${CFG.API_URL}/usage`, { headers: await authHeader() }); if (r.ok) usage = await r.json(); }
-      if (usage && usage.bytes + jobs.length * 700000 > usage.limit) return toast("저장공간(10GB)이 꽉 차서 더 올릴 수 없어요. 안 쓰는 사진을 지워주세요.", 5000);
+      const need = jobs.reduce((n, j) => n + (isVideoFile(j.file) ? j.file.size : 700000), 0);
+      if (usage && usage.bytes + need > usage.limit) return toast("저장공간(10GB)이 꽉 차서 더 올릴 수 없어요. 안 쓰는 사진을 지워주세요.", 5000);
     } catch {}
     if (queue.done + queue.failed.length >= queue.total) { queue.total = 0; queue.done = 0; queue.failed = []; }
     queue.total += jobs.length; queue.jobs.push(...jobs);
@@ -698,7 +809,7 @@
     while (queue.jobs.length) {
       const j = queue.jobs.shift();
       try { await uploadOne(j); queue.done++; }
-      catch (e) { console.warn(e); queue.failed.push(j.file.name); }
+      catch (e) { console.warn(e); queue.failed.push(j.file.name + (e && e.message && /동영상|DNG/.test(e.message) ? ` (${e.message})` : '')); }
       updateQueueUI();
     }
     queue.running--;
@@ -706,14 +817,64 @@
   }
   window.addEventListener('beforeunload', e => { if (queue.running) { e.preventDefault(); e.returnValue = ''; } });
 
+  const MAX_VIDEO = 95 * 1024 * 1024;
+  const isVideoFile = f => /^video\//.test(f.type) || /\.(mp4|mov|m4v)$/i.test(f.name);
+  const isDng = f => /\.dng$/i.test(f.name) || /dng/i.test(f.type);
+  async function loadImg(blob) {
+    const url = URL.createObjectURL(blob);
+    try { const img = new Image(); img.src = url; await img.decode(); return img; }
+    finally { setTimeout(() => URL.revokeObjectURL(url), 0); }
+  }
+  // DNG(RAW): 브라우저가 직접 못 열면 파일 안에 들어 있는 미리보기 JPEG 중 가장 큰 것을 꺼내 씀
+  async function dngPreview(file) {
+    try { return await loadImg(file); } catch {}
+    const buf = new Uint8Array(await file.arrayBuffer());
+    const found = [];
+    for (let i = 0; i < buf.length - 3; i++) {
+      if (buf[i] !== 0xFF || buf[i + 1] !== 0xD8 || buf[i + 2] !== 0xFF) continue;
+      for (let j = i + 3; j < buf.length - 1; j++) if (buf[j] === 0xFF && buf[j + 1] === 0xD9) { found.push([i, j + 2]); break; }
+    }
+    found.sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]));
+    for (const [a, b] of found.slice(0, 4)) {
+      if (b - a < 20000) break; // 아주 작은 썸네일은 건너뜀
+      try { return await loadImg(new Blob([buf.subarray(a, b)], { type: 'image/jpeg' })); } catch {}
+    }
+    throw new Error('DNG 안에서 사진을 찾지 못했어요');
+  }
+  // 동영상에서 첫 장면을 잡아 목록용 그림으로
+  function videoPoster(file) {
+    return new Promise((res, rej) => {
+      const url = URL.createObjectURL(file), v = document.createElement('video');
+      v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = url;
+      const fail = () => { URL.revokeObjectURL(url); rej(new Error('이 동영상은 열 수 없어요 (MP4/H.264 권장)')); };
+      v.onerror = fail;
+      v.onloadedmetadata = () => { v.currentTime = Math.min(0.5, (v.duration || 1) / 3); };
+      v.onseeked = () => {
+        const W = v.videoWidth, H = v.videoHeight; if (!W) return fail();
+        const c = document.createElement('canvas'); c.width = W; c.height = H;
+        c.getContext('2d').drawImage(v, 0, 0, W, H);
+        URL.revokeObjectURL(url); res(c);
+      };
+      setTimeout(() => { if (!v.videoWidth) fail(); }, 20000);
+    });
+  }
   async function uploadOne({ file, siteId, phase, space }) {
-    const url = URL.createObjectURL(file);
-    let img;
-    try { img = new Image(); img.src = url; await img.decode(); }
-    catch { URL.revokeObjectURL(url); throw new Error('이미지를 열 수 없음'); }
-    const large = await toJpeg(img, 2000, 0.85), thumb = await toJpeg(img, 900, 0.8);
-    URL.revokeObjectURL(url);
     const id = crypto.randomUUID();
+    if (isVideoFile(file)) {
+      if (file.size > MAX_VIDEO) throw new Error(`동영상이 너무 커요 (${Math.round(file.size / 1048576)}MB, 최대 95MB)`);
+      const poster = await videoPoster(file);
+      const thumb = await toJpeg(poster, 900, 0.8);
+      const t = `ph/${id}_t.jpg`, l = `ph/${id}_v.mp4`;
+      await putFile(t, thumb.blob);
+      try { await putFile(l, file, 'video/mp4'); } catch (e) { await deleteKeys([t]); throw e; }
+      const ins = await sb.from('pf_photos').insert({ id, type: 'video', site_id: siteId, phase, space, t, l, w: thumb.w, h: thumb.h, src_name: file.name, src_size: file.size });
+      if (ins.error) { await deleteKeys([t, l]); throw ins.error; }
+      usage = null; return;
+    }
+    let img;
+    try { img = isDng(file) ? await dngPreview(file) : await loadImg(file); }
+    catch (e) { throw new Error(e.message || '이미지를 열 수 없음'); }
+    const large = await toJpeg(img, 2000, 0.85), thumb = await toJpeg(img, 900, 0.8);
     const t = `ph/${id}_t.jpg`, l = `ph/${id}_l.jpg`;
     await putFile(t, thumb.blob);
     try { await putFile(l, large.blob); } catch (e) { await deleteKeys([t]); throw e; }
@@ -723,8 +884,8 @@
   }
   // --- 사진 저장소 (Cloudflare R2 Worker) ---
   async function authHeader() { return { Authorization: 'Bearer ' + getToken() }; }
-  async function putFile(key, blob) {
-    const r = await fetch(`${CFG.API_URL}/p/${key}`, { method: 'PUT', headers: { ...(await authHeader()), 'Content-Type': 'image/jpeg' }, body: blob });
+  async function putFile(key, blob, type = 'image/jpeg') {
+    const r = await fetch(`${CFG.API_URL}/p/${key}`, { method: 'PUT', headers: { ...(await authHeader()), 'Content-Type': type }, body: blob });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || '업로드 실패 ' + r.status);
   }
   async function deleteKeys(keys) {
@@ -744,7 +905,7 @@
     } catch { el.innerHTML = '<div class="usage"><span>저장공간 정보를 못 불러왔어요</span></div>'; }
   }
   function toJpeg(img, max, q) {
-    const W = img.naturalWidth, H = img.naturalHeight, s = Math.min(1, max / Math.max(W, H));
+    const W = img.naturalWidth || img.width, H = img.naturalHeight || img.height, s = Math.min(1, max / Math.max(W, H));
     const w = Math.round(W * s), h = Math.round(H * s);
     const c = document.createElement('canvas'); c.width = w; c.height = h;
     const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
@@ -768,7 +929,7 @@
       else site = clean(ps[0]);
       if (/^(정보|info)\.txt$/i.test(name) && site && !rest.length) { infos[site] = await f.text(); continue; }
       if (name.startsWith('.') || name.startsWith('~')) continue;
-      if (!/\.(jpe?g|png)$/i.test(name) || !(await isPhoto(f))) { if (!/\.(txt|ini|db|ds_store)$/i.test(name)) skipped.push(f.webkitRelativePath); continue; }
+      if (!OK_EXT.test(name) || !(await isPhoto(f))) { if (!/\.(txt|ini|db|ds_store)$/i.test(name)) skipped.push(f.webkitRelativePath); continue; }
       let phase = 'after';
       if (site && rest.length && phaseOf(rest[0])) { phase = phaseOf(rest[0]); rest = rest.slice(1); }
       items.push({ file: f, siteName: site, phase, space: rest.length ? spaceOf(rest[0]) : '기타' });
@@ -787,7 +948,7 @@
         return `<li><b>${k === '\u0000' ? esc(CFG.etcName) : esc(k)}</b>${k !== '\u0000' && !nameToId[k] ? ' <span class="tag">새 현장</span>' : ''}
           <small>${PH_ORDER.filter(ph => by[ph]).map(ph => `${PH_NAME[ph]} ${by[ph]}`).join(' · ')} — ${sortSpaces(arr.map(i => i.space)).join(', ')}</small></li>`;
       }).join('')}</ul>
-      ${skipped.length ? `<p class="err">JPEG·PNG 사진이 아닌 파일 ${skipped.length}개는 안 올려요</p>` : ''}
+      ${skipped.length ? `<p class="err">JPG·PNG·DNG·MP4가 아닌 파일 ${skipped.length}개는 안 올려요</p>` : ''}
       ${todo.length ? `<button class="btn primary" id="dirGo">${todo.length}장 올리기</button>` : ''}</div>`;
     if ($('#dirGo')) $('#dirGo').onclick = runFolder;
   }

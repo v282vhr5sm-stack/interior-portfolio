@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS photos (
   l TEXT NOT NULL,
   w INTEGER, h INTEGER,
   src_name TEXT, src_size INTEGER,
+  type TEXT NOT NULL DEFAULT 'image',   -- image | video
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS photos_site ON photos (site_id);
