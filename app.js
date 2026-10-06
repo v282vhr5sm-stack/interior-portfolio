@@ -154,8 +154,8 @@
           ${ADMIN ? `<div class="tags">
             ${nMain ? `<span class="tag main">메인파일 ${nMain}쪽</span>` : ''}
             ${(n => n ? `<span class="tag unc">미분류 ${n}</span>` : '')(ps.filter(p => p.phase === 'after' && p.space === '미분류').length)}
-            ${phases.filter(ph => ph !== 'after' || phases.length > 1).map(ph => `<span class="tag ph-${ph}">${PH_NAME[ph]} ${ps.filter(p => p.phase === ph).length}</span>`).join('')}
-            ${sortSpaces(ps.filter(p => p.phase === 'after' && p.space !== '미분류' && p.space !== '기타').map(p => p.space)).slice(0, 5).map(sp => `<span class="tag">${esc(sp)}</span>`).join('')}
+            ${phases.filter(ph => ph !== 'after').map(ph => `<span class="tag ph-${ph}">${PH_NAME[ph]} ${ps.filter(p => p.phase === ph).length}</span>`).join('')}
+            ${(arr => sortSpaces(arr.map(p => p.space)).map(sp => `<span class="tag">${esc(sp)} ${arr.filter(p => p.space === sp).length}</span>`).join(''))(ps.filter(p => p.phase === 'after' && p.space !== '미분류' && p.space !== '기타'))}
           </div>` : ''}
         </div></a>`;
     };
