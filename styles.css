@@ -343,3 +343,4 @@ main.sel-mode { padding-bottom: 220px; }
 .main-pages .ph img { width: 100%; height: auto; }
 .tag.ph-before { background: #ebe7e1; color: var(--before); font-weight: 600; }
 .tag.ph-during { background: #f3e9d9; color: var(--during); font-weight: 600; }
+.tag.unc { background: #fde8e6; color: #b3261e; font-weight: 600; }
