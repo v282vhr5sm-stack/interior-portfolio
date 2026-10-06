@@ -98,7 +98,7 @@
     const ratio = p.w && p.h && !opts.strip ? ` style="aspect-ratio:${p.w}/${p.h}"` : '';
     const badge = p.phase !== 'after' && !opts.noBadge ? `<span class="badge ${p.phase}">${PH_NAME[p.phase]}</span>` : '';
     const cover = ADMIN && s.cover === p.id ? '<span class="badge cover">대표</span>' : '';
-    const del = ADMIN ? '<button class="ph-del" type="button" aria-label="삭제" title="삭제">×</button><button class="ph-zoom" type="button" aria-label="크게 보기" title="크게 보기">⤢</button>' + (p.type === 'video' || p.type === 'main' ? '' : '<button class="ph-crop" type="button" aria-label="잘라서 올리기" title="부분만 잘라서 올리기">✂</button>') : '';
+    const del = ADMIN ? '<button class="ph-del" type="button" aria-label="삭제" title="삭제">×</button><button class="ph-check" type="button" aria-label="선택" title="선택"></button>' : '';
     const play = p.type === 'video' ? '<span class="play" aria-label="동영상">▶</span>' : '';
     return `<figure class="ph" data-i="${idx}"${ratio}>${badge}${cover}${del}${play}
       <img src="${imgUrl(opts.large ? p.l : p.t)}" loading="lazy" alt="" draggable="false">
@@ -333,10 +333,9 @@
   let lbList = [], lbI = 0;
   function bindPhotos(list) {
     app.querySelectorAll('.ph[data-i]').forEach(el => !el.closest('.main-sec') && (el.onclick = e => {
-      if (ADMIN && e.target.closest('.ph-zoom')) { e.stopPropagation(); return openLB(list, +el.dataset.i); }
-      if (ADMIN && e.target.closest('.ph-crop')) { e.stopPropagation(); return cropExisting(list[+el.dataset.i]); }
       if (ADMIN && e.target.closest('.ph-del')) { e.stopPropagation(); return deletePhoto(list[+el.dataset.i]); }
-      if (ADMIN && state.selMode && el.closest('.space-sec')) { const p = list[+el.dataset.i]; state.sel.has(p.id) ? state.sel.delete(p.id) : state.sel.add(p.id); el.classList.toggle('selected', state.sel.has(p.id)); return updateSelBar(); }
+      // 왼쪽 위 동그라미 = 선택, 사진 자체를 누르면 크게 보기
+      if (ADMIN && state.selMode && el.closest('.space-sec') && e.target.closest('.ph-check')) { const p = list[+el.dataset.i]; state.sel.has(p.id) ? state.sel.delete(p.id) : state.sel.add(p.id); el.classList.toggle('selected', state.sel.has(p.id)); return updateSelBar(); }
       openLB(list, +el.dataset.i);
     }));
   }
@@ -653,7 +652,7 @@
         <select data-s="space" ${pd.phase && pd.phase !== 'after' ? 'disabled' : ''}><option value="">${pd.phase && pd.phase !== 'after' ? `공간 없음 (${PH_NAME[pd.phase]})` : '공간 정하기…'}</option>${spaces.map(sp => `<option ${pd.space === sp ? 'selected' : ''}>${esc(sp)}</option>`).join('')}<option value="__new">+ 새 공간…</option></select>
         <select data-s="site"><option value="">다른 현장으로…</option><option value="etc" ${pd.site === 'etc' ? 'selected' : ''}>${esc(CFG.etcName)}</option>${sites.filter(x => x.id !== selCtx.s.id).map(x => `<option value="${x.id}" ${pd.site === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
         <button type="button" data-s="del" class="danger" ${n ? '' : 'disabled'}>삭제</button>
-        <button type="button" data-s="apply" class="apply" ${ready ? '' : 'disabled'}>${ready ? `완료 — ${n}장을 ${esc(summary)}(으)로` : n ? '단계·공간을 고른 뒤 완료' : '사진을 먼저 고르세요'}</button>
+        <button type="button" data-s="apply" class="apply" ${ready ? '' : 'disabled'}>${ready ? `완료 — ${n}장을 ${esc(summary)}(으)로` : n ? '단계·공간을 고른 뒤 완료' : '사진 왼쪽 위 ○를 눌러 고르세요'}</button>
       </div>`;
     const q = k => bar.querySelector(`[data-s="${k}"]`);
     q('all').onclick = () => { selCtx.ps.forEach(p => state.sel.add(p.id)); render(); };
@@ -702,6 +701,7 @@
       <select data-e="phase">${PH_ORDER.map(ph => `<option value="${ph}" ${ph === p.phase ? 'selected' : ''}>${PH_NAME[ph]}</option>`).join('')}</select>
       <select data-e="site"><option value="etc" ${p.site === 'etc' ? 'selected' : ''}>${esc(CFG.etcName)}</option>${sites.map(x => `<option value="${x.id}" ${x.id === p.site ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
       ${s.kind === 'site' ? `<button data-e="cover" ${s.cover === p.id ? 'disabled' : ''}>${s.cover === p.id ? '대표사진 ✓' : '대표사진으로'}</button>` : ''}
+      ${p.type === 'video' ? '' : '<button data-e="crop">✂ 부분 잘라서 올리기</button>'}
       <button data-e="del" class="danger">삭제</button></div>`;
     const ed = k => $(`#lbEdit [data-e="${k}"]`);
     const save = async patch => {
@@ -722,6 +722,7 @@
       if (error) return toast('실패: ' + error.message);
       s.cover = p.id; toast('대표사진으로 정했어요'); render(); showLB();
     };
+    if (ed('crop')) ed('crop').onclick = () => { closeLB(); cropExisting(p); };
     ed('del').onclick = async () => {
       if (!confirm('이 사진을 삭제할까요?')) return;
       const { error } = await sb.from('pf_photos').delete().eq('id', p.id);

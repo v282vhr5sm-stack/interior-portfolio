@@ -298,8 +298,6 @@ button.chip { cursor: pointer; }
 /* 사진 분류 모드 */
 main.sel-mode { padding-bottom: 220px; }
 .sel-mode .space-sec .ph { cursor: pointer; }
-.sel-mode .space-sec .ph::before { content: ''; position: absolute; top: 8px; left: 8px; z-index: 3; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; background: rgba(0,0,0,.25); box-shadow: 0 1px 3px rgba(0,0,0,.3); }
-.sel-mode .space-sec .ph.selected::before { content: '✓'; background: var(--accent); color: #fff; font-size: 14px; font-weight: 700; line-height: 20px; text-align: center; }
 .sel-mode .space-sec .ph.selected img { opacity: .75; }
 .sel-mode .space-sec .ph.selected { outline: 3px solid var(--accent); outline-offset: -3px; }
 .space-sec h2 .btn.small { margin-left: auto; font-size: 12.5px; }
@@ -320,9 +318,6 @@ main.sel-mode { padding-bottom: 220px; }
 @media (max-width: 760px) { .selact { grid-template-columns: 1fr 1fr; } }
 
 /* 크게 보기 버튼 (현장 분류 화면에서만) */
-.ph-zoom { display: none; position: absolute; right: 6px; bottom: 6px; z-index: 3; width: 30px; height: 30px; border-radius: 8px; border: 0; padding: 0; background: rgba(0,0,0,.55); color: #fff; font-size: 16px; line-height: 30px; text-align: center; cursor: zoom-in; }
-.ph-zoom:hover { background: rgba(0,0,0,.75); }
-.sel-mode .space-sec .ph-zoom { display: block; }
 .sel-mode .space-sec .badge.cover { bottom: auto; top: 40px; left: 8px; }
 
 /* 메인파일 */
@@ -346,8 +341,12 @@ main.sel-mode { padding-bottom: 220px; }
 .tag.unc { background: #fde8e6; color: #b3261e; font-weight: 600; }
 
 /* 잘라서 올리기 (현장 분류 화면) */
-.ph-crop { display: none; position: absolute; left: 6px; bottom: 6px; z-index: 3; width: 30px; height: 30px; border-radius: 8px; border: 0; padding: 0; background: rgba(0,0,0,.55); color: #fff; font-size: 15px; line-height: 30px; text-align: center; cursor: pointer; }
-.ph-crop:hover { background: rgba(0,0,0,.75); }
-.sel-mode .space-sec .ph-crop { display: block; }
 .crop-chk { display: inline-flex; align-items: center; gap: 6px; color: #fff; font-size: 14px; padding: 0 6px; }
 .crop-chk input { width: 18px; height: 18px; }
+
+/* 선택 동그라미 (현장 화면) — 사진 자체를 누르면 크게 보기 */
+.ph-check { display: none; position: absolute; top: 6px; left: 6px; z-index: 3; width: 34px; height: 34px; padding: 0; border: 0; background: none; cursor: pointer; }
+.ph-check::before { content: ''; position: absolute; top: 4px; left: 4px; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; background: rgba(0,0,0,.3); box-shadow: 0 1px 3px rgba(0,0,0,.35); box-sizing: border-box; }
+.sel-mode .space-sec .ph-check { display: block; }
+.ph.selected .ph-check::before { content: '✓'; background: var(--accent); color: #fff; font-size: 14px; font-weight: 700; line-height: 20px; text-align: center; }
+.sel-mode .space-sec .ph { cursor: pointer; }
