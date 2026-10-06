@@ -508,7 +508,7 @@
     const btn = app.querySelector('[data-a="classify"]');
     if (btn) {
       btn.textContent = state.selMode ? '분류 끝내기' : '☑ 사진 분류하기';
-      btn.onclick = () => { state.selMode = !state.selMode; state.sel.clear(); render(); if (state.selMode) toast('사진을 눌러서 고른 다음 아래에서 공간·단계를 정하세요', 3500); };
+      btn.onclick = () => { state.selMode = !state.selMode; state.sel.clear(); state.pending = {}; render(); if (state.selMode) toast('사진을 고르고 → 단계·공간을 정한 뒤 → 완료', 3500); };
     }
     app.classList.toggle('sel-mode', !!state.selMode);
     if (state.selMode) {
@@ -528,31 +528,44 @@
     if (!on) { if (bar) bar.remove(); return; }
     if (!bar) { bar = document.createElement('div'); bar.id = 'selBar'; bar.className = 'selbar'; document.body.appendChild(bar); }
     const n = state.sel.size, sites = DATA.sites.filter(x => x.kind === 'site');
+    const pd = state.pending || (state.pending = {});
+    const spaces = [...allSpaces().filter(x => x !== '기타' && x !== '미분류'), '미분류'];
+    if (pd.space && !spaces.includes(pd.space)) spaces.splice(spaces.length - 1, 0, pd.space);
+    const siteName = v => v === 'etc' ? CFG.etcName : (siteById[v] || {}).name;
+    // 고른 내용 요약 → 완료 버튼에 표시
+    const summary = [pd.phase && PH_NAME[pd.phase], pd.space, pd.site && '→ ' + siteName(pd.site)].filter(Boolean).join(' · ');
+    const ready = n && summary;
     bar.innerHTML = `
       <div class="selinfo"><b>${n}장 선택</b>
         <button type="button" data-s="all">현장 전체 선택</button><button type="button" data-s="none" ${n ? '' : 'disabled'}>선택 해제</button>
-        <button type="button" data-s="done" class="done">완료</button></div>
+        <button type="button" data-s="exit" class="exit" aria-label="분류 끝내기">✕ 끝내기</button></div>
       <div class="selact">
-        <select data-s="space" ${n ? '' : 'disabled'}><option value="">공간 정하기…</option>${[...allSpaces().filter(x => x !== '기타' && x !== '미분류'), '미분류'].map(sp => `<option>${esc(sp)}</option>`).join('')}<option value="__new">+ 새 공간…</option></select>
-        <select data-s="phase" ${n ? '' : 'disabled'}><option value="">단계 정하기…</option>${PH_ORDER.map(ph => `<option value="${ph}">${PH_NAME[ph]}</option>`).join('')}</select>
-        <select data-s="site" ${n ? '' : 'disabled'}><option value="">다른 현장으로…</option><option value="etc">${esc(CFG.etcName)}</option>${sites.filter(x => x.id !== selCtx.s.id).map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select>
+        <select data-s="phase"><option value="">단계 정하기…</option>${PH_ORDER.map(ph => `<option value="${ph}" ${pd.phase === ph ? 'selected' : ''}>${PH_NAME[ph]}</option>`).join('')}</select>
+        <select data-s="space"><option value="">공간 정하기…</option>${spaces.map(sp => `<option ${pd.space === sp ? 'selected' : ''}>${esc(sp)}</option>`).join('')}<option value="__new">+ 새 공간…</option></select>
+        <select data-s="site"><option value="">다른 현장으로…</option><option value="etc" ${pd.site === 'etc' ? 'selected' : ''}>${esc(CFG.etcName)}</option>${sites.filter(x => x.id !== selCtx.s.id).map(x => `<option value="${x.id}" ${pd.site === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
         <button type="button" data-s="del" class="danger" ${n ? '' : 'disabled'}>삭제</button>
+        <button type="button" data-s="apply" class="apply" ${ready ? '' : 'disabled'}>${ready ? `완료 — ${n}장을 ${esc(summary)}(으)로` : n ? '단계·공간을 고른 뒤 완료' : '사진을 먼저 고르세요'}</button>
       </div>`;
     const q = k => bar.querySelector(`[data-s="${k}"]`);
     q('all').onclick = () => { selCtx.ps.forEach(p => state.sel.add(p.id)); render(); };
     q('none').onclick = () => { state.sel.clear(); render(); };
-    q('done').onclick = () => { state.selMode = false; state.sel.clear(); render(); };
+    q('exit').onclick = () => { state.selMode = false; state.sel.clear(); state.pending = {}; render(); };
+    // 고르기만 하고, 실제로 바뀌는 건 「완료」를 눌렀을 때
+    q('phase').onchange = e => { pd.phase = e.target.value || undefined; updateSelBar(); };
     q('space').onchange = e => {
-      let v = e.target.value; if (!v) return;
-      if (v === '__new') { v = prompt('공간 이름 (예: 드레스룸, 팬트리)'); if (!v || !v.trim()) { e.target.value = ''; return; } v = spaceOf(v.trim()); }
-      applyBatch({ space: v }, `${n}장을 「${v}」(으)로 정했어요`);
+      let v = e.target.value;
+      if (v === '__new') { v = prompt('공간 이름 (예: 드레스룸, 팬트리)'); v = v && v.trim() ? spaceOf(v.trim()) : pd.space; }
+      pd.space = v || undefined; updateSelBar();
     };
-    q('phase').onchange = e => { const v = e.target.value; if (v) applyBatch({ phase: v }, `${n}장을 ${PH_NAME[v]}(으)로 정했어요`); };
-    q('site').onchange = e => {
-      const v = e.target.value; if (!v) return;
-      const name = v === 'etc' ? CFG.etcName : siteById[v].name;
-      if (!confirm(`${n}장을 「${name}」(으)로 옮길까요?`)) { e.target.value = ''; return; }
-      applyBatch({ site_id: v === 'etc' ? null : v }, `${n}장을 「${name}」(으)로 옮겼어요`);
+    q('site').onchange = e => { pd.site = e.target.value || undefined; updateSelBar(); };
+    q('apply').onclick = () => {
+      if (!ready) return;
+      const patch = {};
+      if (pd.phase) patch.phase = pd.phase;
+      if (pd.space) patch.space = pd.space;
+      if (pd.site) patch.site_id = pd.site === 'etc' ? null : pd.site;
+      state.pending = {};
+      applyBatch(patch, `${n}장을 ${summary}(으)로 정리했어요`);
     };
     q('del').onclick = async () => {
       if (!confirm(`선택한 ${n}장을 삭제할까요? 되돌릴 수 없어요.`)) return;

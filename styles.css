@@ -296,7 +296,7 @@ button.chip { cursor: pointer; }
 .btn.small { padding: 5px 10px; font-size: 12.5px; }
 
 /* 사진 분류 모드 */
-main.sel-mode { padding-bottom: 170px; }
+main.sel-mode { padding-bottom: 220px; }
 .sel-mode .ph-del { display: none; }
 .sel-mode .space-sec .ph { cursor: pointer; }
 .sel-mode .space-sec .ph::before { content: ''; position: absolute; top: 8px; right: 8px; z-index: 3; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; background: rgba(0,0,0,.25); box-shadow: 0 1px 3px rgba(0,0,0,.3); }
@@ -310,8 +310,10 @@ main.sel-mode { padding-bottom: 170px; }
 .selinfo b { margin-right: 4px; }
 .selinfo button { background: none; border: 1px solid rgba(255,255,255,.3); color: #fff; border-radius: 7px; padding: 5px 10px; font-size: 12.5px; }
 .selinfo button:disabled { opacity: .4; }
-.selinfo .done { margin-left: auto; background: #fff; color: var(--ink); border-color: #fff; font-weight: 600; }
+.selinfo .exit { margin-left: auto; }
 .selact { display: grid; grid-template-columns: repeat(3, 1fr) auto; gap: 6px; }
+.selact .apply { grid-column: 1 / -1; background: #fff; color: var(--ink); border-color: #fff; font-weight: 700; padding: 11px 8px; }
+.selact .apply:disabled { background: rgba(255,255,255,.12); color: #fff; opacity: .55; }
 .selact select, .selact button { font: inherit; font-size: 14px; min-width: 0; background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.25); border-radius: 8px; padding: 9px 8px; }
 .selact select option { color: #000; }
 .selact select:disabled, .selact button:disabled { opacity: .4; }
