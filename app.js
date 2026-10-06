@@ -101,19 +101,24 @@
     const del = ADMIN ? '<button class="ph-del" type="button" aria-label="삭제" title="삭제">×</button><button class="ph-zoom" type="button" aria-label="크게 보기" title="크게 보기">⤢</button>' : '';
     const play = p.type === 'video' ? '<span class="play" aria-label="동영상">▶</span>' : '';
     return `<figure class="ph" data-i="${idx}"${ratio}>${badge}${cover}${del}${play}
-      <img src="${imgUrl(p.t)}" loading="lazy" alt="" draggable="false">
+      <img src="${imgUrl(opts.large ? p.l : p.t)}" loading="lazy" alt="" draggable="false">
       ${opts.noCap ? '' : `<figcaption class="cap">${esc(p.phase !== 'after' ? PH_NAME[p.phase] : spLabel(p.space))} · ${esc(s.name)}</figcaption>`}</figure>`;
   };
+  // 현장 메인파일 (PDF는 쪽마다 이미지로 저장됨) — 고객 링크에는 이것만 보임
+  const isMain = p => p.type === 'main';
+  const mainsOf = id => DATA.photos.filter(p => p.site === id && isMain(p)).sort((a, b) => (a.ord || 0) - (b.ord || 0));
   const coverOf = id => {
-    const ps = DATA.photos.filter(p => p.site === id), s = siteById[id];
+    const m = mainsOf(id);
+    if (!ADMIN && m.length) return m[0];
+    const ps = DATA.photos.filter(p => p.site === id && !isMain(p)), s = siteById[id];
     const img = ps.filter(p => p.type !== 'video');
-    return ps.find(p => p.id === s.cover) || img.find(p => p.phase === 'after' && p.space === '거실') || img.find(p => p.phase === 'after') || img[0] || ps[0];
+    return ps.find(p => p.id === s.cover) || img.find(p => p.phase === 'after' && p.space === '거실') || img.find(p => p.phase === 'after') || img[0] || ps[0] || m[0];
   };
 
   // ---------- 공간별 ----------
   function viewSpaces(space) {
     // 공간별 보기는 공사후 사진만 (공사전·공사중은 현장 페이지에서)
-    const pool = DATA.photos.filter(p => p.phase === 'after');
+    const pool = DATA.photos.filter(p => p.phase === 'after' && !isMain(p));
     const spaces = sortSpaces(pool.map(p => p.space));
     if (space && !spaces.includes(space)) space = null;
     const counts = countBy(pool, 'space');
@@ -135,7 +140,8 @@
   // ---------- 현장별 ----------
   function viewSites() {
     const card = s => {
-      const ps = DATA.photos.filter(p => p.site === s.id);
+      const ps = DATA.photos.filter(p => p.site === s.id && !isMain(p));
+      const nMain = mainsOf(s.id).length;
       const c = coverOf(s.id);
       const phases = PH_ORDER.filter(ph => ps.some(p => p.phase === ph));
       const meta = [s.info['위치'], s.info['평수'], s.info['연도']].filter(Boolean).join(' · ');
@@ -144,11 +150,12 @@
           ${ADMIN && s.hidden ? '<span class="badge hid">고객에게 숨김</span>' : ''}</div>
         <div class="body">
           <h3>${esc(s.name)}</h3>
-          <div class="meta">${esc(meta || `사진 ${ps.length}장`)}</div>
-          <div class="tags">
+          <div class="meta">${esc(meta || (ADMIN ? `사진 ${ps.length}장` : ''))}</div>
+          ${ADMIN ? `<div class="tags">
+            ${s.kind === 'site' ? (nMain ? `<span class="tag main">메인파일 ${nMain}쪽</span>` : '<span class="tag">메인파일 없음 · 고객에게 안 보임</span>') : ''}
             ${phases.length > 1 ? phases.map(ph => `<span class="tag">${PH_NAME[ph]}</span>`).join('') : ''}
             ${sortSpaces(ps.map(p => p.space)).slice(0, 5).map(sp => `<span class="tag">${esc(sp)}</span>`).join('')}
-          </div>
+          </div>` : ''}
         </div></a>`;
     };
     const real = DATA.sites.filter(s => s.kind === 'site' && (ADMIN || DATA.photos.some(p => p.site === s.id)));
@@ -164,7 +171,9 @@
   function viewSite(id) {
     const s = siteById[id];
     if (!s) return (location.hash = '#/sites');
-    const ps = DATA.photos.filter(p => p.site === id);
+    if (!ADMIN) return viewSitePublic(s);
+    const ps = DATA.photos.filter(p => p.site === id && !isMain(p));
+    const mains = mainsOf(id);
     if (state.selSite !== id) { state.selSite = id; state.sel.clear(); state.pending = {}; }
     state.selMode = ADMIN; // 관리 화면: 현장에 들어가면 바로 사진을 골라서 분류
     for (const sid of [...state.sel]) if (!ps.some(p => p.id === sid)) state.sel.delete(sid);
@@ -205,27 +214,129 @@
         </div>
       </div>
       ${ADMIN ? '<div id="siteEdit"></div>' : ''}
+      ${s.kind === 'site' ? mainSecHTML(mains) : ''}
       ${spaces.length ? `<div class="filters"><div class="chips">
         ${spaces.map(sp => `<button class="chip" data-jump="${esc(sp)}">${esc(secName(sp))}<b>${ps.filter(p => keyOf(p) === sp).length}</b></button>`).join('')}
       </div></div>` : '<p class="none">아직 사진이 없어요.</p>'}
       ${blocks}`;
     app.querySelectorAll('[data-jump]').forEach(b => b.onclick = () =>
       document.getElementById('sp-' + encodeURIComponent(b.dataset.jump)).scrollIntoView({ behavior: 'smooth' }));
-    if (c) $('#hero').onclick = () => openLB(ordered, ordered.indexOf(c));
+    if (c) $('#hero').onclick = () => isMain(c) ? openLB(mains, mains.indexOf(c)) : openLB(ordered, ordered.indexOf(c));
     bindPhotos(ordered);
-    if (ADMIN) { bindSiteAdmin(s); bindSelect(s, ps, ordered, keyOf); }
+    if (ADMIN) { bindSiteAdmin(s); bindSelect(s, ps, ordered, keyOf); bindMain(s, mains); }
+  }
+
+  // ---------- 메인파일 ----------
+  function mainSecHTML(mains) {
+    return `<section class="main-sec">
+      <h2>메인파일 <small>${mains.length ? `${mains.length}쪽 · ` : ''}고객 링크에는 이것만 보여요</small></h2>
+      ${mains.length ? `<div class="main-strip">${mains.map((p, i) => photoHTML(p, i, { strip: true, noBadge: true, noCap: true })).join('')}</div>`
+        : '<p class="help">아직 메인파일이 없어요. 메인파일이 없는 현장은 고객 링크에 안 보여요.</p>'}
+      <div class="adminbar">
+        <label class="btn primary"><input type="file" id="mainFile" accept="application/pdf,.pdf,image/*,.dng" multiple hidden>${mains.length ? '메인파일 바꾸기' : '＋ 메인파일 올리기 (PDF·이미지)'}</label>
+        ${mains.length ? '<button class="btn danger" type="button" id="mainDel">메인파일 삭제</button>' : ''}
+      </div>
+      <div id="mainProg"></div>
+    </section>`;
+  }
+  function bindMain(s, mains) {
+    app.querySelectorAll('.main-sec .ph').forEach((el, i) => el.onclick = e => {
+      e.stopPropagation();
+      if (e.target.closest('.ph-del')) return deletePhoto(mains[i]);
+      openLB(mains, i);
+    });
+    const f = $('#mainFile');
+    if (f) f.onchange = e => { const files = [...e.target.files]; e.target.value = ''; if (files.length) uploadMain(s, files); };
+    const d = $('#mainDel');
+    if (d) d.onclick = async () => {
+      if (!confirm('메인파일을 삭제할까요? 이 현장은 고객 링크에서 안 보이게 돼요.')) return;
+      try { await api('POST', '/photos/batch-delete', { ids: mains.map(p => p.id) }); } catch (err) { return toast('삭제 실패: ' + err.message); }
+      const gone = new Set(mains.map(p => p.id));
+      DATA.photos = DATA.photos.filter(p => !gone.has(p.id));
+      usage = null; toast('메인파일을 삭제했어요'); render();
+    };
+  }
+  let pdfjsP = null;
+  function loadPdfJs() {
+    const base = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.4.299/';
+    return pdfjsP || (pdfjsP = import(base + 'pdf.min.mjs').then(m => { m.GlobalWorkerOptions.workerSrc = base + 'pdf.worker.min.mjs'; return m; }));
+  }
+  // PDF는 쪽마다 이미지로 바꿔서, 이미지는 그대로 → 순서대로 올리고, 다 되면 예전 메인파일 지우기
+  async function uploadMain(s, files) {
+    const say = t => { const el = $('#mainProg'); if (el) el.innerHTML = t ? `<p class="help"><b>${t}</b></p>` : ''; };
+    const busy = v => { const l = app.querySelector('.main-sec label.btn'); if (l) l.classList.toggle('disabled', v); };
+    busy(true);
+    const pages = [];
+    try {
+      for (const f of files) {
+        if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) {
+          say('PDF 여는 중…');
+          const pdfjs = await loadPdfJs();
+          const doc = await pdfjs.getDocument({ data: new Uint8Array(await f.arrayBuffer()) }).promise;
+          for (let i = 1; i <= doc.numPages; i++) {
+            say(`PDF를 이미지로 바꾸는 중… ${i} / ${doc.numPages}쪽`);
+            const page = await doc.getPage(i);
+            const v1 = page.getViewport({ scale: 1 });
+            const vp = page.getViewport({ scale: Math.min(4, 2000 / Math.max(v1.width, v1.height)) });
+            const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+            const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+            await page.render({ canvasContext: g, viewport: vp, canvas: c }).promise;
+            pages.push({ src: c, name: `${f.name} ${i}쪽` });
+            page.cleanup();
+          }
+          try { if (typeof doc.destroy === 'function') await doc.destroy(); else if (typeof doc.cleanup === 'function') await doc.cleanup(); } catch {}
+        } else if (isVideoFile(f)) toast('메인파일은 PDF나 이미지만 올릴 수 있어요');
+        else pages.push({ src: isDng(f) ? await dngPreview(f) : await loadImg(f), name: f.name });
+      }
+    } catch (e) { say(''); busy(false); return toast('파일을 열 수 없어요: ' + (e.message || e), 4000); }
+    if (!pages.length) { say(''); busy(false); return; }
+    const old = mainsOf(s.id), added = [];
+    try {
+      for (let i = 0; i < pages.length; i++) {
+        say(`올리는 중… ${i + 1} / ${pages.length}`);
+        const large = await toJpeg(pages[i].src, 2000, 0.88), thumb = await toJpeg(pages[i].src, 900, 0.82);
+        const id = crypto.randomUUID(), t = `ph/${id}_t.jpg`, l = `ph/${id}_l.jpg`;
+        await putFile(t, thumb.blob);
+        await putFile(l, large.blob);
+        const row = { id, type: 'main', ord: i, site_id: s.id, phase: 'after', space: '메인파일', t, l, w: thumb.w, h: thumb.h, src_name: pages[i].name, src_size: large.blob.size };
+        const ins = await sb.from('pf_photos').insert(row);
+        if (ins.error) throw ins.error;
+        added.push({ ...row, site: s.id });
+      }
+    } catch (e) {
+      if (added.length) await api('POST', '/photos/batch-delete', { ids: added.map(a => a.id) }).catch(() => {});
+      say(''); busy(false); return toast('올리기 실패: ' + (e.message || e), 4000);
+    }
+    if (old.length) await api('POST', '/photos/batch-delete', { ids: old.map(p => p.id) }).catch(() => {});
+    const gone = new Set(old.map(p => p.id));
+    DATA.photos = DATA.photos.filter(p => !gone.has(p.id)).concat(added);
+    usage = null; toast(`메인파일 ${added.length}쪽을 올렸어요`); render();
+  }
+  // 고객 링크: 현장 메인파일만
+  function viewSitePublic(s) {
+    const mains = mainsOf(s.id);
+    if (!mains.length) return (location.hash = '#/sites');
+    const info = Object.entries(s.info).filter(([k, v]) => k !== '설명' && v);
+    app.innerHTML = `
+      <a class="back" href="#/sites">← 현장 목록</a>
+      <div class="pub-head">
+        <h1>${esc(s.name)}</h1>
+        ${info.length ? `<dl class="info">${info.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : ''}
+        ${s.info['설명'] ? `<p class="desc">${esc(s.info['설명'])}</p>` : ''}
+      </div>
+      <div class="main-pages">${mains.map((p, i) => photoHTML(p, i, { noBadge: true, noCap: true, large: true })).join('')}</div>`;
+    bindPhotos(mains);
   }
 
   // ---------- 라이트박스 ----------
   let lbList = [], lbI = 0;
   function bindPhotos(list) {
-    app.querySelectorAll('.ph[data-i]').forEach(el => el.onclick = e => {
+    app.querySelectorAll('.ph[data-i]').forEach(el => !el.closest('.main-sec') && (el.onclick = e => {
       if (ADMIN && e.target.closest('.ph-zoom')) { e.stopPropagation(); return openLB(list, +el.dataset.i); }
       if (ADMIN && e.target.closest('.ph-del')) { e.stopPropagation(); return deletePhoto(list[+el.dataset.i]); }
       if (ADMIN && state.selMode && el.closest('.space-sec')) { const p = list[+el.dataset.i]; state.sel.has(p.id) ? state.sel.delete(p.id) : state.sel.add(p.id); el.classList.toggle('selected', state.sel.has(p.id)); return updateSelBar(); }
-      if (ADMIN && e.target.closest('.ph-del')) { e.stopPropagation(); return deletePhoto(list[+el.dataset.i]); }
       openLB(list, +el.dataset.i);
-    });
+    }));
   }
   async function deletePhoto(p) {
     if (!p || !confirm('이 사진을 삭제할까요? 되돌릴 수 없어요.')) return false;
@@ -251,12 +362,12 @@
     if (isVid) { if (vid.dataset.src !== p.l) { vid.dataset.src = p.l; vid.poster = imgUrl(p.t); vid.src = imgUrl(p.l); } }
     else { vid.pause(); vid.removeAttribute('src'); vid.dataset.src = ''; vid.load(); $('#lbImg').src = imgUrl(p.l); }
     zReset();
-    $('#lbCap').textContent = p.phase !== 'after' ? `${s.name} · ${PH_NAME[p.phase]}` : `${s.name} · ${spLabel(p.space)} · ${PH_NAME[p.phase]}`;
+    $('#lbCap').textContent = isMain(p) ? `${s.name}${lbList.length > 1 ? ` · ${(p.ord || 0) + 1} / ${lbList.length}쪽` : ''}` : p.phase !== 'after' ? `${s.name} · ${PH_NAME[p.phase]}` : `${s.name} · ${spLabel(p.space)} · ${PH_NAME[p.phase]}`;
     $('#lbSite').href = '#/site/' + s.id;
     $('#lbSite').hidden = location.hash === '#/site/' + s.id;
     $('#lbN').textContent = `${lbI + 1} / ${lbList.length}`;
     [lbList[lbI + 1], lbList[lbI - 1]].forEach(n => n && n.type !== 'video' && (new Image().src = imgUrl(n.l)));
-    if (ADMIN) lbEditor(p);
+    if (ADMIN && !isMain(p)) lbEditor(p); else $('#lbEdit').innerHTML = '';
   }
   const step = d => { lbI = (lbI + d + lbList.length) % lbList.length; showLB(); };
   $('#lbClose').onclick = closeLB;
