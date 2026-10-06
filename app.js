@@ -112,31 +112,23 @@
 
   // ---------- 공간별 ----------
   function viewSpaces(space) {
-    let pool = DATA.photos;
-    const phaseCount = countBy(pool, 'phase');
-    if (state.phase !== 'all') pool = pool.filter(p => p.phase === state.phase);
-    const spK = p => p.phase !== 'after' ? PH_NAME[p.phase] : p.space; // 공사전·공사중은 공간 대신 한 묶음
-    const spaces = sortSpaces(pool.map(spK));
+    // 공간별 보기는 공사후 사진만 (공사전·공사중은 현장 페이지에서)
+    const pool = DATA.photos.filter(p => p.phase === 'after');
+    const spaces = sortSpaces(pool.map(p => p.space));
     if (space && !spaces.includes(space)) space = null;
-    const counts = pool.reduce((m, p) => (m[spK(p)] = (m[spK(p)] || 0) + 1, m), {});
-    const list = space ? pool.filter(p => spK(p) === space) : pool.slice();
+    const counts = countBy(pool, 'space');
+    const list = space ? pool.filter(p => p.space === space) : pool.slice();
     const siteIdx = Object.fromEntries(DATA.sites.map((s, i) => [s.id, i]));
-    list.sort((a, b) => siteIdx[a.site] - siteIdx[b.site] || PH_ORDER.indexOf(a.phase) - PH_ORDER.indexOf(b.phase));
-
-    const segBtn = (k, label) => `<button data-phase="${k}" class="${state.phase === k ? 'on' : ''}" ${k !== 'all' && !phaseCount[k] ? 'disabled' : ''}>${label}</button>`;
+    list.sort((a, b) => siteIdx[a.site] - siteIdx[b.site]);
     app.innerHTML = `
       <div class="filters">
         <div class="chips">
           <a class="chip ${space ? '' : 'on'}" href="#/">전체<b>${pool.length}</b></a>
-          ${spaces.map(s => `<a class="chip ${s === space ? 'on' : ''}" href="#/space/${encodeURIComponent(s)}">${esc(s)}<b>${counts[s]}</b></a>`).join('')}
+          ${spaces.map(s => `<a class="chip ${s === space ? 'on' : ''}" href="#/space/${encodeURIComponent(s)}">${esc(spLabel(s))}<b>${counts[s]}</b></a>`).join('')}
         </div>
-        <div class="phase-row">
-          <div class="seg">${segBtn('after', '공사후')}${segBtn('during', '공사중')}${segBtn('before', '공사전')}${segBtn('all', '전체')}</div>
-          <span class="count">${list.length}장</span>
-        </div>
+        <div class="phase-row"><span class="count">공사후 사진 ${list.length}장</span></div>
       </div>
-      ${list.length ? `<div class="grid">${list.map((p, i) => photoHTML(p, i)).join('')}</div>` : `<p class="none">이 조건에 맞는 사진이 없어요.</p>`}`;
-    app.querySelectorAll('[data-phase]').forEach(b => b.onclick = () => { state.phase = b.dataset.phase; render(); });
+      ${list.length ? `<div class="grid">${list.map((p, i) => photoHTML(p, i)).join('')}</div>` : `<p class="none">공사후 사진이 아직 없어요.</p>`}`;
     bindPhotos(list);
   }
 
