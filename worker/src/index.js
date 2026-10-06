@@ -22,7 +22,8 @@ export default {
     const origin = req.headers.get('Origin') || '';
     const allowed = env.ALLOWED_ORIGINS.split(',').map(s => s.trim());
     const cors = {
-      'Access-Control-Allow-Origin': allowed.includes(origin) ? origin : allowed[0],
+      // 등록된 사이트 주소 + 내 컴퓨터 테스트 주소(localhost 아무 포트)
+      'Access-Control-Allow-Origin': allowed.includes(origin) || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin) ? origin : allowed[0],
       'Access-Control-Allow-Methods': 'GET, PUT, POST, PATCH, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Authorization, Content-Type, Range',
       'Access-Control-Max-Age': '86400',

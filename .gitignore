@@ -2,3 +2,4 @@
 .serve.cjs
 worker/node_modules/
 worker/.wrangler/
+미리보기/
