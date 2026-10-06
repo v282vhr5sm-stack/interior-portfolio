@@ -102,7 +102,7 @@
     const play = p.type === 'video' ? '<span class="play" aria-label="동영상">▶</span>' : '';
     return `<figure class="ph" data-i="${idx}"${ratio}>${badge}${cover}${del}${play}
       <img src="${imgUrl(p.t)}" loading="lazy" alt="" draggable="false">
-      ${opts.noCap ? '' : `<figcaption class="cap">${esc(p.space)} · ${esc(s.name)}</figcaption>`}</figure>`;
+      ${opts.noCap ? '' : `<figcaption class="cap">${esc(p.phase === 'before' ? '공사전' : spLabel(p.space))} · ${esc(s.name)}</figcaption>`}</figure>`;
   };
   const coverOf = id => {
     const ps = DATA.photos.filter(p => p.site === id), s = siteById[id];
@@ -115,10 +115,11 @@
     let pool = DATA.photos;
     const phaseCount = countBy(pool, 'phase');
     if (state.phase !== 'all') pool = pool.filter(p => p.phase === state.phase);
-    const spaces = sortSpaces(pool.map(p => p.space));
+    const spK = p => p.phase === 'before' ? '공사전' : p.space; // 공사전은 공간 대신 한 묶음
+    const spaces = sortSpaces(pool.map(spK));
     if (space && !spaces.includes(space)) space = null;
-    const counts = countBy(pool, 'space');
-    const list = space ? pool.filter(p => p.space === space) : pool.slice();
+    const counts = pool.reduce((m, p) => (m[spK(p)] = (m[spK(p)] || 0) + 1, m), {});
+    const list = space ? pool.filter(p => spK(p) === space) : pool.slice();
     const siteIdx = Object.fromEntries(DATA.sites.map((s, i) => [s.id, i]));
     list.sort((a, b) => siteIdx[a.site] - siteIdx[b.site] || PH_ORDER.indexOf(a.phase) - PH_ORDER.indexOf(b.phase));
 
@@ -174,10 +175,15 @@
     const ps = DATA.photos.filter(p => p.site === id);
     if (state.selSite !== id) { state.selSite = id; state.selMode = false; state.sel.clear(); }
     for (const sid of [...state.sel]) if (!ps.some(p => p.id === sid)) state.sel.delete(sid);
-    const spaces = sortSpaces(ps.map(p => p.space));
+    // 공사전 사진은 공간 구분 없이 한 묶음 ("공사전" 칸)
+    const BEFORE = '__before';
+    const keyOf = p => p.phase === 'before' ? BEFORE : p.space;
+    const spaces = sortSpaces(ps.filter(p => p.phase !== 'before').map(p => p.space));
+    if (ps.some(p => p.phase === 'before')) spaces.push(BEFORE);
+    const secName = sp => sp === BEFORE ? '공사전' : spLabel(sp);
     const ordered = [];
     const blocks = spaces.map(sp => {
-      const inSpace = ps.filter(p => p.space === sp);
+      const inSpace = ps.filter(p => keyOf(p) === sp);
       const phases = PH_ORDER.filter(ph => inSpace.some(p => p.phase === ph));
       const rows = phases.map(ph => {
         const html = inSpace.filter(p => p.phase === ph).map(p => photoHTML(p, ordered.push(p) - 1, { strip: true, noBadge: true, noCap: true })).join('');
@@ -185,8 +191,8 @@
           ? `<div class="phase-block"><div class="lbl"><span class="badge ${ph}">${PH_NAME[ph]}</span></div><div class="strip">${html}</div></div>`
           : `<div class="strip">${html}</div>`;
       }).join('');
-      const selAll = ADMIN && state.selMode ? `<button class="btn small" type="button" data-selall="${esc(sp)}">${inSpace.every(p => state.sel.has(p.id)) ? '선택 해제' : '이 공간 전체 선택'}</button>` : '';
-      return `<section class="space-sec" id="sp-${encodeURIComponent(sp)}"><h2>${esc(spLabel(sp))} <small>${inSpace.length}장</small> ${selAll}</h2>${rows}</section>`;
+      const selAll = ADMIN && state.selMode ? `<button class="btn small" type="button" data-selall="${esc(sp)}">${inSpace.every(p => state.sel.has(p.id)) ? '선택 해제' : '전체 선택'}</button>` : '';
+      return `<section class="space-sec" id="sp-${encodeURIComponent(sp)}"><h2>${sp === BEFORE ? '<span class="badge before">공사전</span>' : esc(secName(sp))} <small>${inSpace.length}장</small> ${selAll}</h2>${rows}</section>`;
     }).join('');
     const c = coverOf(id);
     const info = Object.entries(s.info).filter(([k, v]) => k !== '설명' && v);
@@ -205,14 +211,14 @@
       </div>
       ${ADMIN ? '<div id="siteEdit"></div>' : ''}
       ${spaces.length ? `<div class="filters"><div class="chips">
-        ${spaces.map(sp => `<button class="chip" data-jump="${esc(sp)}">${esc(spLabel(sp))}<b>${ps.filter(p => p.space === sp).length}</b></button>`).join('')}
+        ${spaces.map(sp => `<button class="chip" data-jump="${esc(sp)}">${esc(secName(sp))}<b>${ps.filter(p => keyOf(p) === sp).length}</b></button>`).join('')}
       </div></div>` : '<p class="none">아직 사진이 없어요.</p>'}
       ${blocks}`;
     app.querySelectorAll('[data-jump]').forEach(b => b.onclick = () =>
       document.getElementById('sp-' + encodeURIComponent(b.dataset.jump)).scrollIntoView({ behavior: 'smooth' }));
     if (c) $('#hero').onclick = () => openLB(ordered, ordered.indexOf(c));
     bindPhotos(ordered);
-    if (ADMIN) { bindSiteAdmin(s); bindSelect(s, ps, ordered); }
+    if (ADMIN) { bindSiteAdmin(s); bindSelect(s, ps, ordered, keyOf); }
   }
 
   // ---------- 라이트박스 ----------
@@ -248,7 +254,7 @@
     if (isVid) { if (vid.dataset.src !== p.l) { vid.dataset.src = p.l; vid.poster = imgUrl(p.t); vid.src = imgUrl(p.l); } }
     else { vid.pause(); vid.removeAttribute('src'); vid.dataset.src = ''; vid.load(); $('#lbImg').src = imgUrl(p.l); }
     zReset();
-    $('#lbCap').textContent = `${s.name} · ${p.space} · ${PH_NAME[p.phase]}`;
+    $('#lbCap').textContent = p.phase === 'before' ? `${s.name} · 공사전` : `${s.name} · ${spLabel(p.space)} · ${PH_NAME[p.phase]}`;
     $('#lbSite').href = '#/site/' + s.id;
     $('#lbSite').hidden = location.hash === '#/site/' + s.id;
     $('#lbN').textContent = `${lbI + 1} / ${lbList.length}`;
@@ -503,7 +509,7 @@
 
   // --- 여러 장 골라서 분류하기 ---
   let selCtx = null;
-  function bindSelect(s, ps, ordered) {
+  function bindSelect(s, ps, ordered, keyOf) {
     selCtx = { s, ps, ordered };
     const btn = app.querySelector('[data-a="classify"]');
     if (btn) {
@@ -514,7 +520,7 @@
     if (state.selMode) {
       app.querySelectorAll('.space-sec .ph[data-i]').forEach(el => el.classList.toggle('selected', state.sel.has(ordered[+el.dataset.i].id)));
       app.querySelectorAll('[data-selall]').forEach(b => b.onclick = () => {
-        const inSp = ps.filter(p => p.space === b.dataset.selall);
+        const inSp = ps.filter(p => keyOf(p) === b.dataset.selall);
         const all = inSp.every(p => state.sel.has(p.id));
         inSp.forEach(p => all ? state.sel.delete(p.id) : state.sel.add(p.id));
         render();
@@ -533,6 +539,7 @@
     if (pd.space && !spaces.includes(pd.space)) spaces.splice(spaces.length - 1, 0, pd.space);
     const siteName = v => v === 'etc' ? CFG.etcName : (siteById[v] || {}).name;
     // 고른 내용 요약 → 완료 버튼에 표시
+    if (pd.phase === 'before') pd.space = undefined; // 공사전은 공간 구분 안 함
     const summary = [pd.phase && PH_NAME[pd.phase], pd.space, pd.site && '→ ' + siteName(pd.site)].filter(Boolean).join(' · ');
     const ready = n && summary;
     bar.innerHTML = `
@@ -541,7 +548,7 @@
         <button type="button" data-s="exit" class="exit" aria-label="분류 끝내기">✕ 끝내기</button></div>
       <div class="selact">
         <select data-s="phase"><option value="">단계 정하기…</option>${PH_ORDER.map(ph => `<option value="${ph}" ${pd.phase === ph ? 'selected' : ''}>${PH_NAME[ph]}</option>`).join('')}</select>
-        <select data-s="space"><option value="">공간 정하기…</option>${spaces.map(sp => `<option ${pd.space === sp ? 'selected' : ''}>${esc(sp)}</option>`).join('')}<option value="__new">+ 새 공간…</option></select>
+        <select data-s="space" ${pd.phase === 'before' ? 'disabled' : ''}><option value="">${pd.phase === 'before' ? '공간 없음 (공사전)' : '공간 정하기…'}</option>${spaces.map(sp => `<option ${pd.space === sp ? 'selected' : ''}>${esc(sp)}</option>`).join('')}<option value="__new">+ 새 공간…</option></select>
         <select data-s="site"><option value="">다른 현장으로…</option><option value="etc" ${pd.site === 'etc' ? 'selected' : ''}>${esc(CFG.etcName)}</option>${sites.filter(x => x.id !== selCtx.s.id).map(x => `<option value="${x.id}" ${pd.site === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
         <button type="button" data-s="del" class="danger" ${n ? '' : 'disabled'}>삭제</button>
         <button type="button" data-s="apply" class="apply" ${ready ? '' : 'disabled'}>${ready ? `완료 — ${n}장을 ${esc(summary)}(으)로` : n ? '단계·공간을 고른 뒤 완료' : '사진을 먼저 고르세요'}</button>
