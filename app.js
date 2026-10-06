@@ -109,7 +109,7 @@
   const mainsOf = id => DATA.photos.filter(p => p.site === id && isMain(p)).sort((a, b) => (a.ord || 0) - (b.ord || 0));
   const coverOf = id => {
     const m = mainsOf(id);
-    if (!ADMIN && m.length) return m[0];
+    if (m.length) return m[0]; // 메인파일 첫 장이 현장 대표 사진
     const ps = DATA.photos.filter(p => p.site === id && !isMain(p)), s = siteById[id];
     const img = ps.filter(p => p.type !== 'video');
     return ps.find(p => p.id === s.cover) || img.find(p => p.phase === 'after' && p.space === '거실') || img.find(p => p.phase === 'after') || img[0] || ps[0] || m[0];
@@ -118,7 +118,7 @@
   // ---------- 공간별 ----------
   function viewSpaces(space) {
     // 공간별 보기는 공사후 사진만 (공사전·공사중은 현장 페이지에서)
-    const pool = DATA.photos.filter(p => p.phase === 'after' && !isMain(p));
+    const pool = DATA.photos.filter(p => p.phase === 'after' && !isMain(p) && p.space !== '미분류'); // 분류 끝난 사진만 (미분류는 현장 페이지에서 정리)
     const spaces = sortSpaces(pool.map(p => p.space));
     if (space && !spaces.includes(space)) space = null;
     const counts = countBy(pool, 'space');
@@ -131,7 +131,7 @@
           <a class="chip ${space ? '' : 'on'}" href="#/">전체<b>${pool.length}</b></a>
           ${spaces.map(s => `<a class="chip ${s === space ? 'on' : ''}" href="#/space/${encodeURIComponent(s)}">${esc(spLabel(s))}<b>${counts[s]}</b></a>`).join('')}
         </div>
-        <div class="phase-row"><span class="count">공사후 사진 ${list.length}장</span></div>
+        <div class="phase-row"><span class="count">공사후 · 분류된 사진 ${list.length}장</span></div>
       </div>
       ${list.length ? `<div class="grid">${list.map((p, i) => photoHTML(p, i)).join('')}</div>` : `<p class="none">공사후 사진이 아직 없어요.</p>`}`;
     bindPhotos(list);
@@ -152,7 +152,7 @@
           <h3>${esc(s.name)}</h3>
           <div class="meta">${esc(meta || (ADMIN ? `사진 ${ps.length}장` : ''))}</div>
           ${ADMIN ? `<div class="tags">
-            ${s.kind === 'site' ? (nMain ? `<span class="tag main">메인파일 ${nMain}쪽</span>` : '<span class="tag">메인파일 없음 · 고객에게 안 보임</span>') : ''}
+            ${nMain ? `<span class="tag main">메인파일 ${nMain}쪽</span>` : ''}
             ${phases.length > 1 ? phases.map(ph => `<span class="tag">${PH_NAME[ph]}</span>`).join('') : ''}
             ${sortSpaces(ps.map(p => p.space)).slice(0, 5).map(sp => `<span class="tag">${esc(sp)}</span>`).join('')}
           </div>` : ''}
