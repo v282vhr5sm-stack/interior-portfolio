@@ -602,13 +602,18 @@
 
         ${canFolder ? `<section class="panel">
           <h2>폴더 통째로 올리기 <small>노트북</small></h2>
-          <p class="help">정리해 둔 폴더를 고르면 현장·단계·공간을 폴더 이름으로 알아서 나눠요. 이미 올린 사진은 건너뛰어요.</p>
-<pre class="tree">사진\\  (또는 현장\\, 현장 폴더 하나)
- ├ 현장\\송파 헬리오시티\\공사전\\거실\\…
- │                    \\공사후\\주방\\…
- ├ 현장\\분당 아파트\\거실\\…      ← 단계 폴더 없으면 공사후
- └ 기타작업\\거실\\…              ← 현장명 없는 사진</pre>
-          <label class="btn"><input type="file" id="upDir" webkitdirectory multiple hidden>폴더 고르기</label>
+          <p class="help">정리해 둔 폴더를 넣으면 현장·단계·공간을 폴더 이름으로 알아서 나눠요. 이미 올린 사진은 건너뛰어요.</p>
+          <div class="dropzone" id="dropZone">
+            <b>여기에 폴더를 끌어다 놓으세요</b>
+            <small>여러 폴더를 한꺼번에 선택해서 끌어와도 돼요</small>
+            <label class="btn"><input type="file" id="upDir" webkitdirectory multiple hidden>＋ 폴더 추가</label>
+            <small>(버튼은 한 번에 폴더 하나씩 — 여러 번 눌러서 계속 담을 수 있어요)</small>
+          </div>
+<pre class="tree">현장 폴더들을 모아 둔 상위 폴더 하나만 넣어도 돼요
+ ├ 송파 헬리오시티\\공사전\\거실\\…
+ │              \\공사후\\주방\\…
+ ├ 분당 아파트\\거실\\…        ← 단계 폴더 없으면 공사후
+ └ 기타작업\\거실\\…           ← 현장명 없는 사진</pre>
           <div id="dirPlan"></div>
         </section>` : ''}
 
@@ -649,7 +654,22 @@
       try { blob = await captureScreen(); } catch (err) { if (err && err.name !== 'NotAllowedError') toast('캡쳐를 못 했어요: ' + (err.message || err)); return; }
       cropAndUpload([new File([blob], capName(), { type: 'image/png' })], true);
     };
-    if ($('#upDir')) $('#upDir').onchange = e => planFolder([...e.target.files]);
+    if ($('#upDir')) $('#upDir').onchange = e => {
+      const files = [...e.target.files]; e.target.value = '';
+      addPicked(files.map(file => ({ file, rel: file.webkitRelativePath || file.name })));
+    };
+    const dz = $('#dropZone');
+    if (dz) {
+      dz.ondragover = e => { e.preventDefault(); dz.classList.add('over'); };
+      dz.ondragleave = () => dz.classList.remove('over');
+      dz.ondrop = async e => {
+        e.preventDefault(); dz.classList.remove('over');
+        $('#dirPlan').innerHTML = '<p class="help">폴더 읽는 중…</p>';
+        try { await addPicked(await readDropped(e.dataTransfer)); }
+        catch (err) { $('#dirPlan').innerHTML = `<p class="err">폴더를 못 읽었어요: ${esc(err.message || err)}</p>`; }
+      };
+    }
+    if (picked.size) planFolder([...picked].map(([rel, file]) => ({ rel, file })));
     $('#logout').onclick = () => { try { localStorage.removeItem(TOKEN); localStorage.removeItem(CACHE); } catch {} location.reload(); };
     bindLinkBox();
     loadUsage();
@@ -915,21 +935,60 @@
 
   // --- 폴더 통째로 ---
   let plan = null;
-  async function planFolder(files) {
-    const parts = f => f.webkitRelativePath.split('/');
+  // 고른 폴더들을 모아 두는 곳 (폴더 추가 / 끌어다 놓기 여러 번 가능)
+  const picked = new Map(); // 경로 → File
+  async function addPicked(entries) {
+    for (const { file, rel } of entries) picked.set(rel, file);
+    await planFolder([...picked].map(([rel, file]) => ({ rel, file })));
+  }
+  // 끌어다 놓은 폴더 안의 파일을 전부 꺼내기
+  async function readDropped(dt) {
+    const out = [];
+    const walk = async (entry, path) => {
+      if (entry.isFile) { const file = await new Promise((res, rej) => entry.file(res, rej)); out.push({ file, rel: path + entry.name }); return; }
+      if (!entry.isDirectory) return;
+      const reader = entry.createReader();
+      for (;;) {
+        const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+        if (!batch.length) break;
+        for (const e of batch) await walk(e, path + entry.name + '/');
+      }
+    };
+    const entries = [...dt.items].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+    for (const e of entries) await walk(e, '');
+    return out;
+  }
+  const isSpaceName = n => { const s = spaceOf(n); return CFG.spaceOrder.includes(s) || Object.values(CFG.spaceAlias).includes(s); };
+  async function planFolder(list) {
     const isRoot = n => ['현장', '기타작업'].includes(clean(n));
-    const photoRoot = files.some(f => parts(f).length > 2 && isRoot(parts(f)[1]));
+    // 맨 위 폴더마다 어떤 종류인지 판단
+    //  - 현장/기타작업 폴더를 품은 "사진" 폴더  → photoRoot
+    //  - 바로 아래가 공사전·후 또는 거실·주방 같은 공간 → 현장 폴더 하나
+    //  - 그 밖 (현장 폴더들을 모아 둔 상위 폴더) → 안의 폴더 하나하나가 현장
+    const kind = {};
+    const byRoot = {};
+    for (const it of list) { const ps = it.rel.split('/'); if (ps.length > 1) (byRoot[ps[0]] = byRoot[ps[0]] || new Set()).add(ps.length > 2 ? ps[1] : ''); }
+    for (const [root, subs] of Object.entries(byRoot)) {
+      const dirs = [...subs].filter(Boolean);
+      if (isRoot(root)) kind[root] = 'named';
+      else if (dirs.some(isRoot)) kind[root] = 'photoRoot';
+      else if (!dirs.length || dirs.some(d => phaseOf(d) || isSpaceName(d))) kind[root] = 'site';
+      else kind[root] = 'container';
+    }
     const items = [], infos = {}, skipped = [];
-    for (const f of files) {
-      const ps = parts(f), name = ps[ps.length - 1];
+    for (const { file: f, rel } of list) {
+      const ps = rel.split('/'), name = ps[ps.length - 1];
       let rest = ps.slice(1, -1), root = clean(ps[0]), site;
-      if (photoRoot) { if (rest.length && isRoot(rest[0])) { root = clean(rest[0]); rest = rest.slice(1); } else root = '기타작업'; }
+      const k = kind[ps[0]];
+      if (ps.length === 1) { root = '기타작업'; } // 낱개 파일
+      else if (k === 'photoRoot') { if (rest.length && isRoot(rest[0])) { root = clean(rest[0]); rest = rest.slice(1); } else root = '기타작업'; }
+      else if (k === 'container') { if (rest.length) { root = '현장'; } else root = '기타작업'; }
       if (root === '현장') { if (rest.length) { site = clean(rest[0]); rest = rest.slice(1); } else site = null; }
       else if (root === '기타작업') site = null;
       else site = clean(ps[0]);
       if (/^(정보|info)\.txt$/i.test(name) && site && !rest.length) { infos[site] = await f.text(); continue; }
       if (name.startsWith('.') || name.startsWith('~')) continue;
-      if (!OK_EXT.test(name) || !(await isPhoto(f))) { if (!/\.(txt|ini|db|ds_store)$/i.test(name)) skipped.push(f.webkitRelativePath); continue; }
+      if (!OK_EXT.test(name) || !(await isPhoto(f))) { if (!/\.(txt|ini|db|ds_store)$/i.test(name)) skipped.push(rel); continue; }
       let phase = 'after';
       if (site && rest.length && phaseOf(rest[0])) { phase = phaseOf(rest[0]); rest = rest.slice(1); }
       items.push({ file: f, siteName: site, phase, space: rest.length ? spaceOf(rest[0]) : '기타' });
@@ -941,7 +1000,9 @@
     const groups = {};
     for (const it of todo) { const k = it.siteName ?? '\u0000'; (groups[k] = groups[k] || []).push(it); }
     plan = { todo, infos, groups };
+    const roots = Object.keys(byRoot);
     $('#dirPlan').innerHTML = `<div class="planbox">
+      <div class="picked-row"><span>담은 폴더 ${roots.length}개: ${roots.slice(0, 6).map(esc).join(', ')}${roots.length > 6 ? ' …' : ''}</span><button class="btn small" id="dirClear" type="button">비우기</button></div>
       <b>새로 올릴 사진 ${todo.length}장</b>${items.length - todo.length ? ` <small>(이미 올린 ${items.length - todo.length}장 건너뜀)</small>` : ''}
       <ul>${Object.entries(groups).map(([k, arr]) => {
         const by = countBy(arr, 'phase');
@@ -951,6 +1012,7 @@
       ${skipped.length ? `<p class="err">JPG·PNG·DNG·MP4가 아닌 파일 ${skipped.length}개는 안 올려요</p>` : ''}
       ${todo.length ? `<button class="btn primary" id="dirGo">${todo.length}장 올리기</button>` : ''}</div>`;
     if ($('#dirGo')) $('#dirGo').onclick = runFolder;
+    $('#dirClear').onclick = () => { picked.clear(); plan = null; $('#dirPlan').innerHTML = ''; };
   }
   const parseInfo = txt => {
     const info = {}, desc = [];
@@ -981,6 +1043,7 @@
       }
       for (const it of arr) jobs.push({ file: it.file, siteId, phase: it.phase, space: it.space });
     }
+    picked.clear(); plan = null;
     $('#dirPlan').innerHTML = '';
     enqueue(jobs);
   }
