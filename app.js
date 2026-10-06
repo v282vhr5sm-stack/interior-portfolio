@@ -98,7 +98,7 @@
     const ratio = p.w && p.h && !opts.strip ? ` style="aspect-ratio:${p.w}/${p.h}"` : '';
     const badge = p.phase !== 'after' && !opts.noBadge ? `<span class="badge ${p.phase}">${PH_NAME[p.phase]}</span>` : '';
     const cover = ADMIN && s.cover === p.id ? '<span class="badge cover">대표</span>' : '';
-    const del = ADMIN ? '<button class="ph-del" type="button" aria-label="삭제" title="삭제">×</button>' : '';
+    const del = ADMIN ? '<button class="ph-del" type="button" aria-label="삭제" title="삭제">×</button><button class="ph-zoom" type="button" aria-label="크게 보기" title="크게 보기">⤢</button>' : '';
     const play = p.type === 'video' ? '<span class="play" aria-label="동영상">▶</span>' : '';
     return `<figure class="ph" data-i="${idx}"${ratio}>${badge}${cover}${del}${play}
       <img src="${imgUrl(p.t)}" loading="lazy" alt="" draggable="false">
@@ -173,7 +173,8 @@
     const s = siteById[id];
     if (!s) return (location.hash = '#/sites');
     const ps = DATA.photos.filter(p => p.site === id);
-    if (state.selSite !== id) { state.selSite = id; state.selMode = false; state.sel.clear(); }
+    if (state.selSite !== id) { state.selSite = id; state.sel.clear(); state.pending = {}; }
+    state.selMode = ADMIN; // 관리 화면: 현장에 들어가면 바로 사진을 골라서 분류
     for (const sid of [...state.sel]) if (!ps.some(p => p.id === sid)) state.sel.delete(sid);
     // 공사전 사진은 공간 구분 없이 한 묶음 ("공사전" 칸)
     const BEFORE = '__before';
@@ -225,6 +226,8 @@
   let lbList = [], lbI = 0;
   function bindPhotos(list) {
     app.querySelectorAll('.ph[data-i]').forEach(el => el.onclick = e => {
+      if (ADMIN && e.target.closest('.ph-zoom')) { e.stopPropagation(); return openLB(list, +el.dataset.i); }
+      if (ADMIN && e.target.closest('.ph-del')) { e.stopPropagation(); return deletePhoto(list[+el.dataset.i]); }
       if (ADMIN && state.selMode && el.closest('.space-sec')) { const p = list[+el.dataset.i]; state.sel.has(p.id) ? state.sel.delete(p.id) : state.sel.add(p.id); el.classList.toggle('selected', state.sel.has(p.id)); return updateSelBar(); }
       if (ADMIN && e.target.closest('.ph-del')) { e.stopPropagation(); return deletePhoto(list[+el.dataset.i]); }
       openLB(list, +el.dataset.i);
@@ -458,13 +461,11 @@
 
   // --- 현장 편집 ---
   function siteAdminBar(s) {
-    if (s.kind === 'etc') return `<div class="adminbar"><button class="btn primary" data-a="classify">☑ 사진 분류하기</button><a class="btn" href="#/upload?site=etc">＋ 사진 추가</a></div>`;
+    if (s.kind === 'etc') return `<div class="adminbar"><a class="btn" href="#/upload?site=etc">＋ 사진 추가</a></div>`;
     return `<div class="adminbar">
-      <button class="btn primary" data-a="classify">☑ 사진 분류하기</button>
       <a class="btn" href="#/upload?site=${s.id}">＋ 사진 추가</a>
       <button class="btn" data-a="edit">정보 수정</button>
       <button class="btn" data-a="hide">${s.hidden ? '고객에게 보이기' : '고객에게 숨기기'}</button>
-      <button class="btn" data-a="top">맨 앞으로</button>
       <button class="btn danger" data-a="del">현장 삭제</button></div>`;
   }
   function bindSiteAdmin(s) {
@@ -474,11 +475,6 @@
       const { error } = await sb.from('pf_sites').update({ hidden: !s.hidden }).eq('id', s.id);
       if (error) return toast('실패: ' + error.message);
       s.hidden = !s.hidden; toast(s.hidden ? '고객 링크에서 숨겼어요' : '고객 링크에 보여요'); render();
-    };
-    act('top').onclick = async () => {
-      const { error } = await sb.from('pf_sites').update({ sort: Date.now() / 1000 }).eq('id', s.id);
-      if (error) return toast('실패: ' + error.message);
-      toast('현장 목록 맨 앞으로 옮겼어요'); scheduleReload();
     };
     act('del').onclick = async () => {
       const ps = DATA.photos.filter(p => p.site === s.id);
@@ -544,8 +540,7 @@
     const ready = n && summary;
     bar.innerHTML = `
       <div class="selinfo"><b>${n}장 선택</b>
-        <button type="button" data-s="all">현장 전체 선택</button><button type="button" data-s="none" ${n ? '' : 'disabled'}>선택 해제</button>
-        <button type="button" data-s="exit" class="exit" aria-label="분류 끝내기">✕ 끝내기</button></div>
+        <button type="button" data-s="all">현장 전체 선택</button><button type="button" data-s="none" ${n ? '' : 'disabled'}>선택 해제</button></div>
       <div class="selact">
         <select data-s="phase"><option value="">단계 정하기…</option>${PH_ORDER.map(ph => `<option value="${ph}" ${pd.phase === ph ? 'selected' : ''}>${PH_NAME[ph]}</option>`).join('')}</select>
         <select data-s="space" ${pd.phase === 'before' ? 'disabled' : ''}><option value="">${pd.phase === 'before' ? '공간 없음 (공사전)' : '공간 정하기…'}</option>${spaces.map(sp => `<option ${pd.space === sp ? 'selected' : ''}>${esc(sp)}</option>`).join('')}<option value="__new">+ 새 공간…</option></select>
@@ -556,7 +551,6 @@
     const q = k => bar.querySelector(`[data-s="${k}"]`);
     q('all').onclick = () => { selCtx.ps.forEach(p => state.sel.add(p.id)); render(); };
     q('none').onclick = () => { state.sel.clear(); render(); };
-    q('exit').onclick = () => { state.selMode = false; state.sel.clear(); state.pending = {}; render(); };
     // 고르기만 하고, 실제로 바뀌는 건 「완료」를 눌렀을 때
     q('phase').onchange = e => { pd.phase = e.target.value || undefined; updateSelBar(); };
     q('space').onchange = e => {

@@ -297,9 +297,8 @@ button.chip { cursor: pointer; }
 
 /* 사진 분류 모드 */
 main.sel-mode { padding-bottom: 220px; }
-.sel-mode .ph-del { display: none; }
 .sel-mode .space-sec .ph { cursor: pointer; }
-.sel-mode .space-sec .ph::before { content: ''; position: absolute; top: 8px; right: 8px; z-index: 3; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; background: rgba(0,0,0,.25); box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.sel-mode .space-sec .ph::before { content: ''; position: absolute; top: 8px; left: 8px; z-index: 3; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; background: rgba(0,0,0,.25); box-shadow: 0 1px 3px rgba(0,0,0,.3); }
 .sel-mode .space-sec .ph.selected::before { content: '✓'; background: var(--accent); color: #fff; font-size: 14px; font-weight: 700; line-height: 20px; text-align: center; }
 .sel-mode .space-sec .ph.selected img { opacity: .75; }
 .sel-mode .space-sec .ph.selected { outline: 3px solid var(--accent); outline-offset: -3px; }
@@ -319,3 +318,9 @@ main.sel-mode { padding-bottom: 220px; }
 .selact select:disabled, .selact button:disabled { opacity: .4; }
 .selact .danger { color: #ffb4ab; }
 @media (max-width: 760px) { .selact { grid-template-columns: 1fr 1fr; } }
+
+/* 크게 보기 버튼 (현장 분류 화면에서만) */
+.ph-zoom { display: none; position: absolute; right: 6px; bottom: 6px; z-index: 3; width: 30px; height: 30px; border-radius: 8px; border: 0; padding: 0; background: rgba(0,0,0,.55); color: #fff; font-size: 16px; line-height: 30px; text-align: center; cursor: zoom-in; }
+.ph-zoom:hover { background: rgba(0,0,0,.75); }
+.sel-mode .space-sec .ph-zoom { display: block; }
+.sel-mode .space-sec .badge.cover { bottom: auto; top: 40px; left: 8px; }
