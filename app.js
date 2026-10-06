@@ -85,11 +85,13 @@
   }
 
   // ---------- 공통 ----------
-  const spaceRank = s => { const i = CFG.spaceOrder.indexOf(s); return i < 0 ? (s === '기타' ? 999 : 500) : i; };
+  // 미분류: 관리 화면에선 맨 앞(분류할 것), 고객 화면에선 맨 뒤
+  const spaceRank = s => { if (s === '미분류') return ADMIN ? -1 : 1000; const i = CFG.spaceOrder.indexOf(s); return i < 0 ? (s === '기타' ? 999 : 500) : i; };
+  const spLabel = s => !ADMIN && s === '미분류' ? '기타' : s; // 고객에겐 미분류 대신 기타
   const sortSpaces = arr => [...new Set(arr)].sort((a, b) => spaceRank(a) - spaceRank(b) || a.localeCompare(b, 'ko'));
   const countBy = (arr, k) => arr.reduce((m, p) => (m[p[k]] = (m[p[k]] || 0) + 1, m), {});
   const allSpaces = () => sortSpaces([...CFG.spaceOrder, ...DATA.photos.map(p => p.space)]);
-  const state = { phase: CFG.defaultPhase === 'all' ? 'all' : 'after' };
+  const state = { phase: CFG.defaultPhase === 'all' ? 'all' : 'after', selMode: false, sel: new Set(), selSite: null };
 
   const photoHTML = (p, idx, opts = {}) => {
     const s = siteById[p.site];
@@ -170,6 +172,8 @@
     const s = siteById[id];
     if (!s) return (location.hash = '#/sites');
     const ps = DATA.photos.filter(p => p.site === id);
+    if (state.selSite !== id) { state.selSite = id; state.selMode = false; state.sel.clear(); }
+    for (const sid of [...state.sel]) if (!ps.some(p => p.id === sid)) state.sel.delete(sid);
     const spaces = sortSpaces(ps.map(p => p.space));
     const ordered = [];
     const blocks = spaces.map(sp => {
@@ -181,7 +185,8 @@
           ? `<div class="phase-block"><div class="lbl"><span class="badge ${ph}">${PH_NAME[ph]}</span></div><div class="strip">${html}</div></div>`
           : `<div class="strip">${html}</div>`;
       }).join('');
-      return `<section class="space-sec" id="sp-${encodeURIComponent(sp)}"><h2>${esc(sp)} <small>${inSpace.length}장</small></h2>${rows}</section>`;
+      const selAll = ADMIN && state.selMode ? `<button class="btn small" type="button" data-selall="${esc(sp)}">${inSpace.every(p => state.sel.has(p.id)) ? '선택 해제' : '이 공간 전체 선택'}</button>` : '';
+      return `<section class="space-sec" id="sp-${encodeURIComponent(sp)}"><h2>${esc(spLabel(sp))} <small>${inSpace.length}장</small> ${selAll}</h2>${rows}</section>`;
     }).join('');
     const c = coverOf(id);
     const info = Object.entries(s.info).filter(([k, v]) => k !== '설명' && v);
@@ -200,20 +205,21 @@
       </div>
       ${ADMIN ? '<div id="siteEdit"></div>' : ''}
       ${spaces.length ? `<div class="filters"><div class="chips">
-        ${spaces.map(sp => `<button class="chip" data-jump="${esc(sp)}">${esc(sp)}<b>${ps.filter(p => p.space === sp).length}</b></button>`).join('')}
+        ${spaces.map(sp => `<button class="chip" data-jump="${esc(sp)}">${esc(spLabel(sp))}<b>${ps.filter(p => p.space === sp).length}</b></button>`).join('')}
       </div></div>` : '<p class="none">아직 사진이 없어요.</p>'}
       ${blocks}`;
     app.querySelectorAll('[data-jump]').forEach(b => b.onclick = () =>
       document.getElementById('sp-' + encodeURIComponent(b.dataset.jump)).scrollIntoView({ behavior: 'smooth' }));
     if (c) $('#hero').onclick = () => openLB(ordered, ordered.indexOf(c));
     bindPhotos(ordered);
-    if (ADMIN) bindSiteAdmin(s);
+    if (ADMIN) { bindSiteAdmin(s); bindSelect(s, ps, ordered); }
   }
 
   // ---------- 라이트박스 ----------
   let lbList = [], lbI = 0;
   function bindPhotos(list) {
     app.querySelectorAll('.ph[data-i]').forEach(el => el.onclick = e => {
+      if (ADMIN && state.selMode && el.closest('.space-sec')) { const p = list[+el.dataset.i]; state.sel.has(p.id) ? state.sel.delete(p.id) : state.sel.add(p.id); el.classList.toggle('selected', state.sel.has(p.id)); return updateSelBar(); }
       if (ADMIN && e.target.closest('.ph-del')) { e.stopPropagation(); return deletePhoto(list[+el.dataset.i]); }
       openLB(list, +el.dataset.i);
     });
@@ -446,9 +452,10 @@
 
   // --- 현장 편집 ---
   function siteAdminBar(s) {
-    if (s.kind === 'etc') return `<div class="adminbar"><a class="btn" href="#/upload?site=etc">＋ 사진 추가</a></div>`;
+    if (s.kind === 'etc') return `<div class="adminbar"><button class="btn primary" data-a="classify">☑ 사진 분류하기</button><a class="btn" href="#/upload?site=etc">＋ 사진 추가</a></div>`;
     return `<div class="adminbar">
-      <a class="btn primary" href="#/upload?site=${s.id}">＋ 사진 추가</a>
+      <button class="btn primary" data-a="classify">☑ 사진 분류하기</button>
+      <a class="btn" href="#/upload?site=${s.id}">＋ 사진 추가</a>
       <button class="btn" data-a="edit">정보 수정</button>
       <button class="btn" data-a="hide">${s.hidden ? '고객에게 보이기' : '고객에게 숨기기'}</button>
       <button class="btn" data-a="top">맨 앞으로</button>
@@ -492,6 +499,77 @@
         s.name = name; s.info = info; toast('저장했어요'); render();
       };
     };
+  }
+
+  // --- 여러 장 골라서 분류하기 ---
+  let selCtx = null;
+  function bindSelect(s, ps, ordered) {
+    selCtx = { s, ps, ordered };
+    const btn = app.querySelector('[data-a="classify"]');
+    if (btn) {
+      btn.textContent = state.selMode ? '분류 끝내기' : '☑ 사진 분류하기';
+      btn.onclick = () => { state.selMode = !state.selMode; state.sel.clear(); render(); if (state.selMode) toast('사진을 눌러서 고른 다음 아래에서 공간·단계를 정하세요', 3500); };
+    }
+    app.classList.toggle('sel-mode', !!state.selMode);
+    if (state.selMode) {
+      app.querySelectorAll('.space-sec .ph[data-i]').forEach(el => el.classList.toggle('selected', state.sel.has(ordered[+el.dataset.i].id)));
+      app.querySelectorAll('[data-selall]').forEach(b => b.onclick = () => {
+        const inSp = ps.filter(p => p.space === b.dataset.selall);
+        const all = inSp.every(p => state.sel.has(p.id));
+        inSp.forEach(p => all ? state.sel.delete(p.id) : state.sel.add(p.id));
+        render();
+      });
+    }
+    updateSelBar();
+  }
+  function updateSelBar() {
+    let bar = $('#selBar');
+    const on = ADMIN && state.selMode && selCtx && location.hash.startsWith('#/site/');
+    if (!on) { if (bar) bar.remove(); return; }
+    if (!bar) { bar = document.createElement('div'); bar.id = 'selBar'; bar.className = 'selbar'; document.body.appendChild(bar); }
+    const n = state.sel.size, sites = DATA.sites.filter(x => x.kind === 'site');
+    bar.innerHTML = `
+      <div class="selinfo"><b>${n}장 선택</b>
+        <button type="button" data-s="all">현장 전체 선택</button><button type="button" data-s="none" ${n ? '' : 'disabled'}>선택 해제</button>
+        <button type="button" data-s="done" class="done">완료</button></div>
+      <div class="selact">
+        <select data-s="space" ${n ? '' : 'disabled'}><option value="">공간 정하기…</option>${[...allSpaces().filter(x => x !== '기타' && x !== '미분류'), '미분류'].map(sp => `<option>${esc(sp)}</option>`).join('')}<option value="__new">+ 새 공간…</option></select>
+        <select data-s="phase" ${n ? '' : 'disabled'}><option value="">단계 정하기…</option>${PH_ORDER.map(ph => `<option value="${ph}">${PH_NAME[ph]}</option>`).join('')}</select>
+        <select data-s="site" ${n ? '' : 'disabled'}><option value="">다른 현장으로…</option><option value="etc">${esc(CFG.etcName)}</option>${sites.filter(x => x.id !== selCtx.s.id).map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select>
+        <button type="button" data-s="del" class="danger" ${n ? '' : 'disabled'}>삭제</button>
+      </div>`;
+    const q = k => bar.querySelector(`[data-s="${k}"]`);
+    q('all').onclick = () => { selCtx.ps.forEach(p => state.sel.add(p.id)); render(); };
+    q('none').onclick = () => { state.sel.clear(); render(); };
+    q('done').onclick = () => { state.selMode = false; state.sel.clear(); render(); };
+    q('space').onchange = e => {
+      let v = e.target.value; if (!v) return;
+      if (v === '__new') { v = prompt('공간 이름 (예: 드레스룸, 팬트리)'); if (!v || !v.trim()) { e.target.value = ''; return; } v = spaceOf(v.trim()); }
+      applyBatch({ space: v }, `${n}장을 「${v}」(으)로 정했어요`);
+    };
+    q('phase').onchange = e => { const v = e.target.value; if (v) applyBatch({ phase: v }, `${n}장을 ${PH_NAME[v]}(으)로 정했어요`); };
+    q('site').onchange = e => {
+      const v = e.target.value; if (!v) return;
+      const name = v === 'etc' ? CFG.etcName : siteById[v].name;
+      if (!confirm(`${n}장을 「${name}」(으)로 옮길까요?`)) { e.target.value = ''; return; }
+      applyBatch({ site_id: v === 'etc' ? null : v }, `${n}장을 「${name}」(으)로 옮겼어요`);
+    };
+    q('del').onclick = async () => {
+      if (!confirm(`선택한 ${n}장을 삭제할까요? 되돌릴 수 없어요.`)) return;
+      const ids = [...state.sel];
+      try { await api('POST', '/photos/batch-delete', { ids }); } catch (err) { return toast('삭제 실패: ' + err.message); }
+      const gone = new Set(ids);
+      DATA.photos = DATA.photos.filter(p => !gone.has(p.id));
+      state.sel.clear(); usage = null; toast(`${ids.length}장 삭제했어요`); render();
+    };
+  }
+  async function applyBatch(patch, msg) {
+    const ids = [...state.sel];
+    try { await api('POST', '/photos/batch', { ids, patch }); } catch (err) { toast('실패: ' + err.message); return render(); }
+    const set = new Set(ids);
+    for (const p of DATA.photos) if (set.has(p.id)) { Object.assign(p, patch); if ('site_id' in patch) p.site = patch.site_id || 'etc'; }
+    if ('site_id' in patch && patch.site_id === null && !siteById.etc) { const etc = { id: 'etc', name: CFG.etcName, kind: 'etc', info: {}, hidden: false }; DATA.sites.push(etc); siteById.etc = etc; }
+    state.sel.clear(); toast(msg, 2500); render();
   }
 
   // --- 사진 편집 (라이트박스 아래) ---
@@ -991,7 +1069,7 @@
       if (!OK_EXT.test(name) || !(await isPhoto(f))) { if (!/\.(txt|ini|db|ds_store)$/i.test(name)) skipped.push(rel); continue; }
       let phase = 'after';
       if (site && rest.length && phaseOf(rest[0])) { phase = phaseOf(rest[0]); rest = rest.slice(1); }
-      items.push({ file: f, siteName: site, phase, space: rest.length ? spaceOf(rest[0]) : '기타' });
+      items.push({ file: f, siteName: site, phase, space: rest.length && isSpaceName(rest[0]) ? spaceOf(rest[0]) : '미분류' }); // 거실·주방 같은 진짜 공간 이름만, 나머지는 미분류
     }
     // 이미 올린 사진 건너뛰기
     const nameToId = Object.fromEntries(DATA.sites.filter(s => s.kind === 'site').map(s => [s.name, s.id]));
@@ -1064,6 +1142,7 @@
     const route = h.split('/')[0], arg = h.split('/').slice(1).join('/');
     const tab = route === 'sites' || route === 'site' ? 'sites' : route === 'upload' ? 'upload' : 'space';
     document.querySelectorAll('.tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === tab));
+    if (ADMIN && route !== 'site') { const b = $('#selBar'); if (b) b.remove(); app.classList.remove('sel-mode'); }
     if (ADMIN && !session) return viewLogin();
     if (!loaded) return;
     if (route === 'upload' && ADMIN) return viewUpload(new URLSearchParams(qs || ''));

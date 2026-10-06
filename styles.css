@@ -294,3 +294,26 @@ button.chip { cursor: pointer; }
 .dropzone small { color: var(--muted); font-size: 12.5px; }
 .picked-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 13px; color: var(--muted); }
 .btn.small { padding: 5px 10px; font-size: 12.5px; }
+
+/* 사진 분류 모드 */
+main.sel-mode { padding-bottom: 170px; }
+.sel-mode .ph-del { display: none; }
+.sel-mode .space-sec .ph { cursor: pointer; }
+.sel-mode .space-sec .ph::before { content: ''; position: absolute; top: 8px; right: 8px; z-index: 3; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; background: rgba(0,0,0,.25); box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.sel-mode .space-sec .ph.selected::before { content: '✓'; background: var(--accent); color: #fff; font-size: 14px; font-weight: 700; line-height: 20px; text-align: center; }
+.sel-mode .space-sec .ph.selected img { opacity: .75; }
+.sel-mode .space-sec .ph.selected { outline: 3px solid var(--accent); outline-offset: -3px; }
+.space-sec h2 .btn.small { margin-left: auto; font-size: 12.5px; }
+.space-sec h2 { flex-wrap: wrap; }
+.selbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 80; background: var(--ink); color: #fff; padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); box-shadow: 0 -6px 20px rgba(0,0,0,.2); display: flex; flex-direction: column; gap: 8px; }
+.selinfo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14px; }
+.selinfo b { margin-right: 4px; }
+.selinfo button { background: none; border: 1px solid rgba(255,255,255,.3); color: #fff; border-radius: 7px; padding: 5px 10px; font-size: 12.5px; }
+.selinfo button:disabled { opacity: .4; }
+.selinfo .done { margin-left: auto; background: #fff; color: var(--ink); border-color: #fff; font-weight: 600; }
+.selact { display: grid; grid-template-columns: repeat(3, 1fr) auto; gap: 6px; }
+.selact select, .selact button { font: inherit; font-size: 14px; min-width: 0; background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.25); border-radius: 8px; padding: 9px 8px; }
+.selact select option { color: #000; }
+.selact select:disabled, .selact button:disabled { opacity: .4; }
+.selact .danger { color: #ffb4ab; }
+@media (max-width: 760px) { .selact { grid-template-columns: 1fr 1fr; } }

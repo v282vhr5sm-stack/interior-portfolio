@@ -118,6 +118,31 @@ export default {
         return json({ bytes, count, limit: +env.LIMIT_BYTES });
       }
 
+      // 여러 장 한꺼번에: 분류 바꾸기 / 삭제
+      if (req.method === 'POST' && (path === '/photos/batch' || path === '/photos/batch-delete')) {
+        const b = await req.json();
+        const ids = (Array.isArray(b.ids) ? b.ids : []).filter(x => typeof x === 'string').slice(0, 2000);
+        if (!ids.length) return json({ ok: true, n: 0 });
+        const chunks = []; for (let i = 0; i < ids.length; i += 90) chunks.push(ids.slice(i, i + 90));
+        if (path === '/photos/batch-delete') {
+          for (const c of chunks) {
+            const q = c.map(() => '?').join(',');
+            const ps = (await env.DB.prepare(`SELECT t, l FROM photos WHERE id IN (${q})`).bind(...c).all()).results;
+            await deleteFiles(env, ps.flatMap(p => [p.t, p.l]));
+            await env.DB.prepare(`DELETE FROM photos WHERE id IN (${q})`).bind(...c).run();
+          }
+        } else {
+          const patch = b.patch || {};
+          const fields = PHOTO_FIELDS.filter(f => f in patch);
+          if (!fields.length) return json({ ok: true, n: 0 });
+          if ('phase' in patch && !['before', 'during', 'after'].includes(patch.phase)) return json({ error: '단계가 잘못됐어요' }, 400);
+          const vals = fields.map(f => patch[f] ?? null);
+          await env.DB.batch(chunks.map(c => env.DB.prepare(`UPDATE photos SET ${fields.map(f => f + ' = ?').join(', ')} WHERE id IN (${c.map(() => '?').join(',')})`).bind(...vals, ...c)));
+        }
+        await touch(env);
+        return json({ ok: true, n: ids.length });
+      }
+
       const m = path.match(/^\/(sites|photos)(?:\/([\w-]+))?$/);
       if (m) {
         const [, table, id] = m;
