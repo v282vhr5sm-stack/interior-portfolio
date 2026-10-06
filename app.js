@@ -154,7 +154,7 @@
           ${ADMIN ? `<div class="tags">
             ${nMain ? `<span class="tag main">메인파일 ${nMain}쪽</span>` : ''}
             ${phases.length > 1 ? phases.map(ph => `<span class="tag">${PH_NAME[ph]}</span>`).join('') : ''}
-            ${sortSpaces(ps.map(p => p.space)).slice(0, 5).map(sp => `<span class="tag">${esc(sp)}</span>`).join('')}
+            ${sortSpaces(ps.filter(p => p.phase === 'after' && p.space !== '미분류' && p.space !== '기타').map(p => p.space)).slice(0, 5).map(sp => `<span class="tag">${esc(sp)}</span>`).join('')}
           </div>` : ''}
         </div></a>`;
     };
