@@ -344,3 +344,10 @@ main.sel-mode { padding-bottom: 220px; }
 .tag.ph-before { background: #ebe7e1; color: var(--before); font-weight: 600; }
 .tag.ph-during { background: #f3e9d9; color: var(--during); font-weight: 600; }
 .tag.unc { background: #fde8e6; color: #b3261e; font-weight: 600; }
+
+/* 잘라서 올리기 (현장 분류 화면) */
+.ph-crop { display: none; position: absolute; left: 6px; bottom: 6px; z-index: 3; width: 30px; height: 30px; border-radius: 8px; border: 0; padding: 0; background: rgba(0,0,0,.55); color: #fff; font-size: 15px; line-height: 30px; text-align: center; cursor: pointer; }
+.ph-crop:hover { background: rgba(0,0,0,.75); }
+.sel-mode .space-sec .ph-crop { display: block; }
+.crop-chk { display: inline-flex; align-items: center; gap: 6px; color: #fff; font-size: 14px; padding: 0 6px; }
+.crop-chk input { width: 18px; height: 18px; }

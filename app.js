@@ -98,7 +98,7 @@
     const ratio = p.w && p.h && !opts.strip ? ` style="aspect-ratio:${p.w}/${p.h}"` : '';
     const badge = p.phase !== 'after' && !opts.noBadge ? `<span class="badge ${p.phase}">${PH_NAME[p.phase]}</span>` : '';
     const cover = ADMIN && s.cover === p.id ? '<span class="badge cover">대표</span>' : '';
-    const del = ADMIN ? '<button class="ph-del" type="button" aria-label="삭제" title="삭제">×</button><button class="ph-zoom" type="button" aria-label="크게 보기" title="크게 보기">⤢</button>' : '';
+    const del = ADMIN ? '<button class="ph-del" type="button" aria-label="삭제" title="삭제">×</button><button class="ph-zoom" type="button" aria-label="크게 보기" title="크게 보기">⤢</button>' + (p.type === 'video' || p.type === 'main' ? '' : '<button class="ph-crop" type="button" aria-label="잘라서 올리기" title="부분만 잘라서 올리기">✂</button>') : '';
     const play = p.type === 'video' ? '<span class="play" aria-label="동영상">▶</span>' : '';
     return `<figure class="ph" data-i="${idx}"${ratio}>${badge}${cover}${del}${play}
       <img src="${imgUrl(opts.large ? p.l : p.t)}" loading="lazy" alt="" draggable="false">
@@ -334,6 +334,7 @@
   function bindPhotos(list) {
     app.querySelectorAll('.ph[data-i]').forEach(el => !el.closest('.main-sec') && (el.onclick = e => {
       if (ADMIN && e.target.closest('.ph-zoom')) { e.stopPropagation(); return openLB(list, +el.dataset.i); }
+      if (ADMIN && e.target.closest('.ph-crop')) { e.stopPropagation(); return cropExisting(list[+el.dataset.i]); }
       if (ADMIN && e.target.closest('.ph-del')) { e.stopPropagation(); return deletePhoto(list[+el.dataset.i]); }
       if (ADMIN && state.selMode && el.closest('.space-sec')) { const p = list[+el.dataset.i]; state.sel.has(p.id) ? state.sel.delete(p.id) : state.sel.add(p.id); el.classList.toggle('selected', state.sel.has(p.id)); return updateSelBar(); }
       openLB(list, +el.dataset.i);
@@ -893,12 +894,13 @@
       const url = URL.createObjectURL(file);
       const el = document.createElement('div');
       el.className = 'crop';
-      el.innerHTML = `<div class="crop-top"><b>${opts.title || '올릴 부분을 드래그해서 고르세요'}</b><span>${esc(pickHint())}</span></div>
+      el.innerHTML = `<div class="crop-top"><b>${opts.title || '올릴 부분을 드래그해서 고르세요'}</b><span>${esc(opts.hint || pickHint())}</span></div>
         <div class="crop-stage"><div class="crop-wrap"><img alt="" draggable="false"><div class="crop-box" hidden></div></div></div>
         <div class="crop-bar">
           <button class="btn" data-c="cancel">${opts.multi ? '이 사진 건너뛰기' : '취소'}</button>
           <button class="btn" data-c="reset" hidden>다시 고르기</button>
-          <button class="btn" data-c="all">전체 올리기</button>
+          ${opts.noAll ? '' : '<button class="btn" data-c="all">전체 올리기</button>'}
+          ${opts.replaceOption ? '<label class="crop-chk"><input type="checkbox" data-c="replace"> 원본은 지우고 이걸로 바꾸기</label>' : ''}
           <button class="btn primary" data-c="ok" disabled>선택한 부분 올리기</button>
         </div>`;
       document.body.appendChild(el);
@@ -938,10 +940,29 @@
       });
       btn('cancel').onclick = () => done(null);
       btn('reset').onclick = () => { sel = null; draw(); };
-      btn('all').onclick = () => done(file);
-      btn('ok').onclick = async () => done(await cut(sel));
+      if (btn('all')) btn('all').onclick = () => done(file);
+      btn('ok').onclick = async () => { const f = await cut(sel); if (btn('replace')) f._replace = btn('replace').checked; done(f); };
       img.onerror = () => { toast('이 사진은 열 수 없어요'); done(null); };
     });
+  }
+  // 올라가 있는 사진에서 부분만 잘라서 → 새 사진으로 추가 (원하면 원본과 바꾸기)
+  async function cropExisting(p) {
+    if (!p) return;
+    toast('사진 불러오는 중…', 1500);
+    let blob;
+    try { const r = await fetch(imgUrl(p.l)); if (!r.ok) throw 0; blob = await r.blob(); } catch { return toast('사진을 불러오지 못했어요'); }
+    const s = siteById[p.site];
+    const file = new File([blob], (p.src_name || '사진').replace(/.w+$/, '') + '.jpg', { type: blob.type || 'image/jpeg' });
+    const out = await openCropper(file, { title: '남길 부분을 드래그해서 고르세요', noAll: true, replaceOption: true,
+      hint: `${s ? s.name : ''} · ${p.phase !== 'after' ? PH_NAME[p.phase] : spLabel(p.space)} 에 올라가요` });
+    if (!out) return;
+    toast('올리는 중…', 1500);
+    try {
+      await uploadOne({ file: out, siteId: p.site_id ?? null, phase: p.phase, space: p.space });
+      if (out._replace) { await api('DELETE', `/photos/${p.id}`); DATA.photos = DATA.photos.filter(x => x.id !== p.id); }
+      toast(out._replace ? '잘라낸 사진으로 바꿨어요' : '잘라낸 사진을 추가했어요');
+    } catch (e) { toast('올리기 실패: ' + (e.message || e)); }
+    usage = null; scheduleReload();
   }
   async function cropAndUpload(files, isCapture) {
     if (!ready()) return toast(pickHint());
