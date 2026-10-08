@@ -330,9 +330,9 @@
   // 고객 링크: 메인파일 + 공사후 현장 사진(공간별). 다운로드는 메인파일 원본 PDF만
   function viewSitePublic(s) {
     const mains = mainsOf(s.id);
-    if (!mains.length) return (location.hash = '#/sites');
     const info = Object.entries(s.info).filter(([k, v]) => k !== '설명' && v);
-    const ps = DATA.photos.filter(p => p.site === s.id && !isMain(p) && p.phase === 'after');
+    const ps = DATA.photos.filter(p => p.site === s.id && !isMain(p) && p.phase === 'after' && p.space !== '미분류');
+    if (!mains.length && !ps.length) return (location.hash = '#/sites');
     const spaces = sortSpaces(ps.map(p => p.space));
     const all = [...mains]; // 크게 보기에서 메인파일 → 현장 사진 순서로 넘어가게 한 목록
     const mainHTML = mains.map(p => photoHTML(p, all.indexOf(p), { noBadge: true, noCap: true })).join('');
@@ -350,7 +350,7 @@
         ${s.info['설명'] ? `<p class="desc">${esc(s.info['설명'])}</p>` : ''}
         ${pdf ? '<button class="btn primary dl-main" type="button" id="dlMain">⬇ 메인파일 PDF 다운로드</button>' : ''}
       </div>
-      <div class="main-pages">${mainHTML}</div>
+      ${mains.length ? `<div class="main-pages">${mainHTML}</div>` : ''}
       ${ps.length ? `<h2 class="section-title pub-photos">현장 사진 <small>${ps.length}장</small></h2>${blocks}` : ''}`;
     bindPhotos(all);
     if (pdf) $('#dlMain').onclick = () => downloadMain(s);
