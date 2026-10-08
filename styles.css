@@ -350,3 +350,13 @@ main.sel-mode { padding-bottom: 220px; }
 .sel-mode .space-sec .ph-check { display: block; }
 .ph.selected .ph-check::before { content: '✓'; background: var(--accent); color: #fff; font-size: 14px; font-weight: 700; line-height: 20px; text-align: center; }
 .sel-mode .space-sec .ph { cursor: pointer; }
+
+/* 올리기 전 미리보기 */
+.pv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; margin: 8px 0 4px; }
+.pv { position: relative; aspect-ratio: 1; border-radius: 6px; overflow: hidden; background: var(--chip); display: flex; align-items: center; justify-content: center; }
+.pv img { width: 100%; height: 100%; object-fit: cover; }
+.pv-ext { font-size: 12px; font-weight: 700; color: var(--muted); }
+.pv small { position: absolute; left: 0; right: 0; bottom: 0; font-size: 10px; color: #fff; background: linear-gradient(transparent, rgba(0,0,0,.55)); padding: 8px 4px 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.pv-x { position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; border-radius: 50%; border: 0; padding: 0; background: rgba(0,0,0,.6); color: #fff; font-size: 13px; line-height: 20px; cursor: pointer; }
+.pv.more { font-size: 13px; color: var(--muted); font-weight: 600; }
+.planbox li { margin-bottom: 14px; }

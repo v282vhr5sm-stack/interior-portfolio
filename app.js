@@ -807,8 +807,11 @@
           <div class="dropzone" id="dropZone">
             <b>여기에 폴더를 끌어다 놓으세요</b>
             <small>여러 폴더를 한꺼번에 선택해서 끌어와도 돼요</small>
-            <label class="btn"><input type="file" id="upDir" webkitdirectory multiple hidden>＋ 폴더 추가</label>
-            <small>(버튼은 한 번에 폴더 하나씩 — 여러 번 눌러서 계속 담을 수 있어요)</small>
+            <div class="adminbar" style="margin-top:4px;justify-content:center">
+              <label class="btn"><input type="file" id="upDir" webkitdirectory multiple hidden>＋ 폴더 추가</label>
+              <label class="btn"><input type="file" id="upLoose" multiple hidden accept="image/*,video/mp4,video/quicktime,application/pdf,.pdf,.dng,.mp4,.mov">＋ 파일 추가</label>
+            </div>
+            <small>폴더는 한 번에 하나씩, 여러 번 눌러서 계속 담을 수 있어요 · 낱개 파일은 위에서 고른 현장·단계·공간으로 들어가요</small>
           </div>
 <pre class="tree">현장 폴더들을 모아 둔 상위 폴더 하나만 넣어도 돼요
  ├ 송파 헬리오시티\\공사전\\거실\\…
@@ -859,6 +862,7 @@
       const files = [...e.target.files]; e.target.value = '';
       addPicked(files.map(file => ({ file, rel: file.webkitRelativePath || file.name })));
     };
+    if ($('#upLoose')) $('#upLoose').onchange = e => { const files = [...e.target.files]; e.target.value = ''; if (files.length) addPicked(files.map(file => ({ file, rel: file.name }))); };
     const dz = $('#dropZone');
     if (dz) {
       dz.ondragover = e => { e.preventDefault(); dz.classList.add('over'); };
@@ -1007,7 +1011,11 @@
     const n = up.site === '__new' ? up.newName.trim() : siteById[up.site]?.name || CFG.etcName;
     return `${n} · ${PH_NAME[up.phase]} · ${up.space} 에 올라가요`;
   }
-  function refreshPick() { const l = $('#pickLbl'); if (!l) return; l.classList.toggle('off', !ready()); $('#pickHint').textContent = pickHint(); }
+  function refreshPick() {
+    const l = $('#pickLbl'); if (!l) return; l.classList.toggle('off', !ready()); $('#pickHint').textContent = pickHint();
+    // 담아 둔 낱개 파일이 있으면 바뀐 현장·단계·공간으로 다시 정리
+    if ([...picked.keys()].some(r => !r.includes('/'))) planFolder([...picked].map(([rel, file]) => ({ rel, file })));
+  }
   async function resolveSite() {
     if (up.site === 'etc') return null;
     if (up.site !== '__new') return up.site;
@@ -1224,6 +1232,17 @@
     for (const e of entries) await walk(e, '');
     return out;
   }
+  function looseTarget() {
+    let site = null;
+    if (up.site === '__new' && up.newName.trim()) site = up.newName.trim();
+    else if (up.site && up.site !== 'etc' && up.site !== '__new' && siteById[up.site]) site = siteById[up.site].name;
+    const chosen = up.site && (up.site !== '__new' || up.newName.trim());
+    return { site, phase: chosen ? up.phase : 'after', space: chosen && up.phase === 'after' && up.space ? up.space : '미분류' };
+  }
+  // 미리보기용 작은 사진 주소 (파일마다 한 번만 만들고, 비우거나 올리면 정리)
+  const thumbUrls = new Map();
+  const thumbOf = f => { if (!/\.(jpe?g|png)$/i.test(f.name)) return null; if (!thumbUrls.has(f)) thumbUrls.set(f, URL.createObjectURL(f)); return thumbUrls.get(f); };
+  const clearThumbs = () => { for (const u of thumbUrls.values()) URL.revokeObjectURL(u); thumbUrls.clear(); };
   const isSpaceName = n => { const s = spaceOf(n); return CFG.spaceOrder.includes(s) || Object.values(CFG.spaceAlias).includes(s); };
   async function planFolder(list) {
     const isRoot = n => ['현장', '기타작업'].includes(clean(n));
@@ -1255,9 +1274,11 @@
       if (/^(정보|info)\.txt$/i.test(name) && site && !rest.length) { infos[site] = await f.text(); continue; }
       if (name.startsWith('.') || name.startsWith('~')) continue;
       if (!OK_EXT.test(name) || !(await isPhoto(f))) { if (!/\.(txt|ini|db|ds_store)$/i.test(name)) skipped.push(rel); continue; }
+      // 낱개 파일: 위에서 고른 현장·단계·공간으로 (안 골랐으면 기타 작업물 · 미분류)
+      if (ps.length === 1) { const tg = looseTarget(); items.push({ file: f, rel, siteName: tg.site, phase: tg.phase, space: tg.space }); continue; }
       let phase = 'after';
       if (site && rest.length && phaseOf(rest[0])) { phase = phaseOf(rest[0]); rest = rest.slice(1); }
-      items.push({ file: f, siteName: site, phase, space: rest.length && isSpaceName(rest[0]) ? spaceOf(rest[0]) : '미분류' }); // 거실·주방 같은 진짜 공간 이름만, 나머지는 미분류
+      items.push({ file: f, rel, siteName: site, phase, space: rest.length && isSpaceName(rest[0]) ? spaceOf(rest[0]) : '미분류' }); // 거실·주방 같은 진짜 공간 이름만, 나머지는 미분류
     }
     // 이미 올린 사진 건너뛰기
     const nameToId = Object.fromEntries(DATA.sites.filter(s => s.kind === 'site').map(s => [s.name, s.id]));
@@ -1266,19 +1287,24 @@
     const groups = {};
     for (const it of todo) { const k = it.siteName ?? '\u0000'; (groups[k] = groups[k] || []).push(it); }
     plan = { todo, infos, groups };
-    const roots = Object.keys(byRoot);
+    const roots = Object.keys(byRoot), nLoose = list.filter(it => !it.rel.includes('/')).length;
     $('#dirPlan').innerHTML = `<div class="planbox">
-      <div class="picked-row"><span>담은 폴더 ${roots.length}개: ${roots.slice(0, 6).map(esc).join(', ')}${roots.length > 6 ? ' …' : ''}</span><button class="btn small" id="dirClear" type="button">비우기</button></div>
+      <div class="picked-row"><span>${roots.length ? `담은 폴더 ${roots.length}개: ${roots.slice(0, 6).map(esc).join(', ')}${roots.length > 6 ? ' …' : ''}` : ''}${roots.length && nLoose ? ' · ' : ''}${nLoose ? `낱개 파일 ${nLoose}개` : ''}</span><button class="btn small" id="dirClear" type="button">비우기</button></div>
       <b>새로 올릴 사진 ${todo.length}장</b>${items.length - todo.length ? ` <small>(이미 올린 ${items.length - todo.length}장 건너뜀)</small>` : ''}
       <ul>${Object.entries(groups).map(([k, arr]) => {
         const by = countBy(arr, 'phase');
         return `<li><b>${k === '\u0000' ? esc(CFG.etcName) : esc(k)}</b>${k !== '\u0000' && !nameToId[k] ? ' <span class="tag">새 현장</span>' : ''}
-          <small>${PH_ORDER.filter(ph => by[ph]).map(ph => `${PH_NAME[ph]} ${by[ph]}`).join(' · ')} — ${sortSpaces(arr.map(i => i.space)).join(', ')}</small></li>`;
+          <small>${PH_ORDER.filter(ph => by[ph]).map(ph => `${PH_NAME[ph]} ${by[ph]}`).join(' · ')} — ${sortSpaces(arr.map(i => i.space)).join(', ')}</small>
+          <div class="pv-grid">${arr.slice(0, 60).map(it => {
+            const u = thumbOf(it.file), ext = (it.file.name.match(/\.(\w+)$/) || [, ''])[1].toUpperCase();
+            return `<div class="pv" title="${esc(it.rel)}">${u ? `<img src="${u}" loading="lazy" alt="">` : `<span class="pv-ext">${esc(ext)}</span>`}<button type="button" class="pv-x" data-rm="${esc(it.rel)}" aria-label="빼기">×</button><small>${esc(it.phase === 'after' ? it.space : PH_NAME[it.phase])}</small></div>`;
+          }).join('')}${arr.length > 60 ? `<div class="pv more">+${arr.length - 60}장</div>` : ''}</div></li>`;
       }).join('')}</ul>
       ${skipped.length ? `<p class="err">JPG·PNG·DNG·PDF·MP4가 아닌 파일 ${skipped.length}개는 안 올려요</p>` : ''}
       ${todo.length ? `<button class="btn primary" id="dirGo">${todo.length}장 올리기</button>` : ''}</div>`;
     if ($('#dirGo')) $('#dirGo').onclick = runFolder;
-    $('#dirClear').onclick = () => { picked.clear(); plan = null; $('#dirPlan').innerHTML = ''; };
+    $('#dirClear').onclick = () => { picked.clear(); clearThumbs(); plan = null; $('#dirPlan').innerHTML = ''; };
+    $('#dirPlan').querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { picked.delete(b.dataset.rm); if (!picked.size) { clearThumbs(); plan = null; $('#dirPlan').innerHTML = ''; return; } planFolder([...picked].map(([rel, file]) => ({ rel, file }))); });
   }
   const parseInfo = txt => {
     const info = {}, desc = [];
@@ -1309,7 +1335,7 @@
       }
       for (const it of arr) jobs.push({ file: it.file, siteId, phase: it.phase, space: it.space });
     }
-    picked.clear(); plan = null;
+    picked.clear(); plan = null; setTimeout(clearThumbs, 60000);
     $('#dirPlan').innerHTML = '';
     enqueue(jobs);
   }
