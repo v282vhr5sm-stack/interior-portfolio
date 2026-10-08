@@ -798,6 +798,7 @@
             <b>📋 캡쳐 붙여넣기</b>
             <small>스크린샷 → 왼쪽 아래 미리보기 → 완료 → <b>복사 후 삭제</b><br>그다음 여기를 <b>길게 눌러 「붙여넣기」</b> (사진첩에 안 남아요)</small>
           </div>`}
+          <div id="dirPlan"></div>
           ${queueHTML()}
         </section>
 
@@ -818,7 +819,6 @@
  │              \\공사후\\주방\\…
  ├ 분당 아파트\\거실\\…        ← 단계 폴더 없으면 공사후
  └ 기타작업\\거실\\…           ← 현장명 없는 사진</pre>
-          <div id="dirPlan"></div>
         </section>` : ''}
 
         <section class="panel">
@@ -841,9 +841,9 @@
       const files = [...e.target.files]; e.target.value = '';
       if (!files.length) return;
       if (up.crop) return cropAndUpload(files);
-      const siteId = await resolveSite();
-      if (siteId === undefined) return;
-      enqueue(files.map(file => ({ file, siteId, phase: up.phase, space: up.space })));
+      // 바로 올리지 않고 아래에 미리보기로 모아 둠 → 「만들기 / 올리기」를 눌러야 올라감
+      await addPicked(files.map(file => ({ file, rel: file.name })));
+      const pl = $('#dirPlan'); if (pl) pl.scrollIntoView({ behavior: 'smooth', block: 'center' });
     };
     $('#cropToggle').onchange = e => { up.crop = e.target.checked; };
     if ($('#pasteBox')) {
@@ -1287,6 +1287,7 @@
     const groups = {};
     for (const it of todo) { const k = it.siteName ?? '\u0000'; (groups[k] = groups[k] || []).push(it); }
     plan = { todo, infos, groups };
+    const newSites = Object.keys(groups).filter(k => k !== '\u0000' && !nameToId[k]);
     const roots = Object.keys(byRoot), nLoose = list.filter(it => !it.rel.includes('/')).length;
     $('#dirPlan').innerHTML = `<div class="planbox">
       <div class="picked-row"><span>${roots.length ? `담은 폴더 ${roots.length}개: ${roots.slice(0, 6).map(esc).join(', ')}${roots.length > 6 ? ' …' : ''}` : ''}${roots.length && nLoose ? ' · ' : ''}${nLoose ? `낱개 파일 ${nLoose}개` : ''}</span><button class="btn small" id="dirClear" type="button">비우기</button></div>
@@ -1301,7 +1302,7 @@
           }).join('')}${arr.length > 60 ? `<div class="pv more">+${arr.length - 60}장</div>` : ''}</div></li>`;
       }).join('')}</ul>
       ${skipped.length ? `<p class="err">JPG·PNG·DNG·PDF·MP4가 아닌 파일 ${skipped.length}개는 안 올려요</p>` : ''}
-      ${todo.length ? `<button class="btn primary" id="dirGo">${todo.length}장 올리기</button>` : ''}</div>`;
+      ${todo.length ? `<button class="btn primary" id="dirGo">${newSites.length ? `만들기 — 새 현장 ${newSites.length}곳 · ${todo.length}장 올리기` : `${todo.length}장 올리기`}</button>` : ''}</div>`;
     if ($('#dirGo')) $('#dirGo').onclick = runFolder;
     $('#dirClear').onclick = () => { picked.clear(); clearThumbs(); plan = null; $('#dirPlan').innerHTML = ''; };
     $('#dirPlan').querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { picked.delete(b.dataset.rm); if (!picked.size) { clearThumbs(); plan = null; $('#dirPlan').innerHTML = ''; return; } planFolder([...picked].map(([rel, file]) => ({ rel, file }))); });
@@ -1331,6 +1332,7 @@
           const { data, error } = await sb.from('pf_sites').insert({ name: k, info: info || {} }).select().single();
           if (error) { toast('현장 만들기 실패: ' + error.message); continue; }
           siteId = data.id; DATA.sites.unshift({ ...data, kind: 'site' }); siteById[data.id] = DATA.sites[0];
+          if (up.site === '__new' && up.newName.trim() === k) { up.site = data.id; up.newName = ''; }
         }
       }
       for (const it of arr) jobs.push({ file: it.file, siteId, phase: it.phase, space: it.space });
