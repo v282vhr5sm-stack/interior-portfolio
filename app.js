@@ -278,7 +278,7 @@
             say(`PDF를 이미지로 바꾸는 중… ${i} / ${doc.numPages}쪽`);
             const page = await doc.getPage(i);
             const v1 = page.getViewport({ scale: 1 });
-            const vp = page.getViewport({ scale: Math.min(4, 2000 / Math.max(v1.width, v1.height)) });
+            const vp = page.getViewport({ scale: Math.min(8, 4000 / Math.max(v1.width, v1.height)) }); // 메인파일은 확대해도 선명하게 4000px
             const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
             const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
             await page.render({ canvasContext: g, viewport: vp, canvas: c, intent: 'print' }).promise;
@@ -295,7 +295,7 @@
     try {
       for (let i = 0; i < pages.length; i++) {
         say(`올리는 중… ${i + 1} / ${pages.length}`);
-        const large = await toJpeg(pages[i].src, 2000, 0.88), thumb = await toJpeg(pages[i].src, 900, 0.82);
+        const large = await toJpeg(pages[i].src, 4000, 0.92), thumb = await toJpeg(pages[i].src, 1400, 0.86); // 메인파일: 크게 4000px, 목록용 1400px
         const id = crypto.randomUUID(), t = `ph/${id}_t.jpg`, l = `ph/${id}_l.jpg`;
         await putFile(t, thumb.blob);
         await putFile(l, large.blob);
@@ -325,7 +325,7 @@
         ${info.length ? `<dl class="info">${info.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : ''}
         ${s.info['설명'] ? `<p class="desc">${esc(s.info['설명'])}</p>` : ''}
       </div>
-      <div class="main-pages">${mains.map((p, i) => photoHTML(p, i, { noBadge: true, noCap: true, large: true })).join('')}</div>`;
+      <div class="main-pages">${mains.map((p, i) => photoHTML(p, i, { noBadge: true, noCap: true })).join('')}</div>`;
     bindPhotos(mains);
   }
 

@@ -9,7 +9,7 @@
 //  GET  /usage                저장공간 사용량
 //  POST /sites, PATCH|DELETE /sites/<id>
 //  POST /photos, PATCH|DELETE /photos/<id>
-const MAX_BYTES = 8 * 1024 * 1024;
+const MAX_BYTES = 15 * 1024 * 1024; // 메인파일 4000px 대비
 const MAX_VIDEO = 95 * 1024 * 1024; // 무료 요금제는 요청 하나에 100MB까지
 const TOKEN_DAYS = 180;
 const SITE_FIELDS = ['name', 'info', 'hidden', 'cover', 'sort'];
