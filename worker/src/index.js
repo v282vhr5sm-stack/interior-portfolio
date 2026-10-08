@@ -60,7 +60,7 @@ export default {
         let sites = (await env.DB.prepare(`SELECT * FROM sites ${admin ? '' : 'WHERE hidden = 0'} ORDER BY sort DESC`).all()).results.map(siteOut);
         const ok = new Set(sites.map(s => s.id));
         const photos = (await env.DB.prepare('SELECT * FROM photos ORDER BY created_at').all()).results
-          .filter(p => admin || (p.type === 'main' && ok.has(p.site_id))) // 고객은 현장 메인파일만
+          .filter(p => admin || ((p.type === 'main' || p.type === 'mainpdf') && ok.has(p.site_id))) // 고객은 현장 메인파일(+원본 PDF)만
           .sort((a, b) => (a.type === 'main' && b.type === 'main' ? a.ord - b.ord : 0))
           .map(p => admin ? p : { ...p, src_name: undefined, src_size: undefined });
         if (!admin) { const has = new Set(photos.map(p => p.site_id)); sites = sites.filter(s => has.has(s.id)); } // 메인파일 있는 현장만
@@ -94,6 +94,16 @@ export default {
           const b = new Uint8Array(await top.arrayBuffer());
           const box = String.fromCharCode(...b.slice(4, 8));
           if (!['ftyp', 'moov', 'mdat', 'wide', 'free', 'skip'].includes(box)) { await env.BUCKET.delete(key); return json({ error: 'MP4 동영상만 올릴 수 있어요' }, 415); }
+          return json({ ok: true, key });
+        }
+        // 메인파일 원본 PDF (고객 다운로드용): 그대로 흘려서 저장 → 앞부분이 %PDF 인지 확인
+        if (/^ph\/[\w-]+_doc\.pdf$/.test(key)) {
+          const len = +req.headers.get('Content-Length') || 0;
+          if (!len) return json({ error: '파일 크기를 알 수 없어요' }, 411);
+          if (len > MAX_VIDEO) return json({ error: `PDF가 너무 커요 (최대 ${Math.round(MAX_VIDEO / 1048576)}MB)` }, 413);
+          await env.BUCKET.put(key, req.body, { httpMetadata: { contentType: 'application/pdf' } });
+          const top = new Uint8Array(await (await env.BUCKET.get(key, { range: { offset: 0, length: 4 } })).arrayBuffer());
+          if (String.fromCharCode(...top) !== '%PDF') { await env.BUCKET.delete(key); return json({ error: 'PDF 파일이 아니에요' }, 415); }
           return json({ ok: true, key });
         }
         if (!/^ph\/[\w-]+\.jpg$/.test(key)) return json({ error: '잘못된 경로' }, 403);
@@ -158,7 +168,7 @@ export default {
             await touch(env);
             return json(siteOut(row));
           }
-          const row = { id: b.id || crypto.randomUUID(), site_id: b.site_id || null, phase: ['before', 'during', 'after'].includes(b.phase) ? b.phase : 'after', space: String(b.space || '기타'), t: b.t, l: b.l, w: b.w | 0, h: b.h | 0, src_name: b.src_name || null, src_size: b.src_size || null, type: ['video', 'main'].includes(b.type) ? b.type : 'image', ord: b.ord | 0, created_at: now };
+          const row = { id: b.id || crypto.randomUUID(), site_id: b.site_id || null, phase: ['before', 'during', 'after'].includes(b.phase) ? b.phase : 'after', space: String(b.space || '기타'), t: b.t, l: b.l, w: b.w | 0, h: b.h | 0, src_name: b.src_name || null, src_size: b.src_size || null, type: ['video', 'main', 'mainpdf'].includes(b.type) ? b.type : 'image', ord: b.ord | 0, created_at: now };
           if (!/^ph\//.test(row.t) || !/^ph\//.test(row.l)) return json({ error: '잘못된 경로' }, 400);
           await insert(env, 'photos', row);
           await touch(env);

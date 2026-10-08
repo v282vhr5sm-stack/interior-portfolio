@@ -363,3 +363,18 @@ main.sel-mode { padding-bottom: 220px; }
 
 /* 사진이 잘리지 않게: 전체가 보이도록 맞추고 남는 칸은 옅은 배경 */
 .card .cover, .site-head .hero, .strip .ph, .main-strip .ph, .pv { background: #ece7df; }
+
+/* 현장 카드: 메인파일(세로 문서) 비율, 이름 칸은 작게, 표시는 작고 단정하게 */
+.cards { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.card .cover { aspect-ratio: 1 / 1.414; }
+.card .body { padding: 7px 9px 9px; }
+.card h3 { font-size: 13.5px; margin: 0; display: flex; align-items: baseline; gap: 5px; line-height: 1.35; }
+.card h3 span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card h3 small { flex-shrink: 0; font-size: 11px; font-weight: 500; color: var(--muted); }
+.card .meta { font-size: 11px; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .tags { gap: 3px; margin-top: 5px; }
+.card .tag { font-size: 10px; padding: 1px 5px; border-radius: 3px; line-height: 1.5; }
+.card .cover .badge.hid { font-size: 10px; top: 6px; left: 6px; }
+@media (min-width: 900px) { .cards { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; } }
+/* 고객: 메인파일 다운로드 버튼 */
+.pub-head .dl-main { margin-top: 12px; }

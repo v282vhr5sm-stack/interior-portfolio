@@ -42,10 +42,13 @@
   // ---------- 데이터 ----------
   let DATA = { sites: [], photos: [] }, siteById = {}, session = null, loaded = false;
   const CACHE = 'pf-cache-' + (ADMIN ? 'admin' : 'public');
+  let MAINPDF = {}; // 현장별 메인파일 원본 PDF (고객 다운로드용)
   function setData(sites, photos) {
     const list = sites.map(s => ({ ...s, kind: 'site', info: s.info || {} }));
     const etc = { id: 'etc', name: CFG.etcName, kind: 'etc', info: {}, hidden: false };
     photos = photos.map(p => ({ ...p, site: p.site_id || 'etc' }));
+    MAINPDF = {};
+    photos = photos.filter(p => { if (p.type === 'mainpdf') { MAINPDF[p.site] = p; return false; } return true; });
     if (photos.some(p => p.site === 'etc')) list.push(etc);
     siteById = Object.fromEntries(list.map(s => [s.id, s]));
     photos = photos.filter(p => siteById[p.site] && (ADMIN || p.phase === 'after')); // 고객은 공사후 사진만
@@ -149,10 +152,9 @@
         <div class="cover">${c ? `<img src="${imgUrl(c.t)}" loading="lazy" alt="" draggable="false">` : '<span class="nophoto">사진 없음</span>'}
           ${ADMIN && s.hidden ? '<span class="badge hid">고객에게 숨김</span>' : ''}</div>
         <div class="body">
-          <h3>${esc(s.name)}</h3>
-          <div class="meta">${esc(meta || (ADMIN ? `사진 ${ps.length}장` : ''))}</div>
+          <h3><span>${esc(s.name)}</span>${ADMIN && ps.length ? `<small>${ps.length}장</small>` : ''}</h3>
+          ${meta ? `<div class="meta">${esc(meta)}</div>` : ''}
           ${ADMIN ? `<div class="tags">
-            ${nMain ? `<span class="tag main">메인파일 ${nMain}쪽</span>` : ''}
             ${(n => n ? `<span class="tag unc">미분류 ${n}</span>` : '')(ps.filter(p => p.phase === 'after' && p.space === '미분류').length)}
             ${phases.filter(ph => ph !== 'after').map(ph => `<span class="tag ph-${ph}">${PH_NAME[ph]} ${ps.filter(p => p.phase === ph).length}</span>`).join('')}
             ${(arr => sortSpaces(arr.map(p => p.space)).map(sp => `<span class="tag">${esc(sp)} ${arr.filter(p => p.space === sp).length}</span>`).join(''))(ps.filter(p => p.phase === 'after' && p.space !== '미분류' && p.space !== '기타'))}
@@ -251,7 +253,8 @@
     const d = $('#mainDel');
     if (d) d.onclick = async () => {
       if (!confirm('메인파일을 삭제할까요? 이 현장은 고객 링크에서 안 보이게 돼요.')) return;
-      try { await api('POST', '/photos/batch-delete', { ids: mains.map(p => p.id) }); } catch (err) { return toast('삭제 실패: ' + err.message); }
+      try { await api('POST', '/photos/batch-delete', { ids: mains.map(p => p.id).concat(MAINPDF[s.id] ? [MAINPDF[s.id].id] : []) }); } catch (err) { return toast('삭제 실패: ' + err.message); }
+      delete MAINPDF[s.id];
       const gone = new Set(mains.map(p => p.id));
       DATA.photos = DATA.photos.filter(p => !gone.has(p.id));
       usage = null; toast('메인파일을 삭제했어요'); render();
@@ -268,6 +271,7 @@
     const busy = v => { const l = app.querySelector('.main-sec label.btn'); if (l) l.classList.toggle('disabled', v); };
     busy(true);
     const pages = [];
+    const pdfFile = files.length === 1 && (files[0].type === 'application/pdf' || /\.pdf$/i.test(files[0].name)) ? files[0] : null;
     try {
       for (const f of files) {
         if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) {
@@ -291,7 +295,7 @@
       }
     } catch (e) { say(''); busy(false); return toast('파일을 열 수 없어요: ' + (e.message || e), 4000); }
     if (!pages.length) { say(''); busy(false); return; }
-    const old = mainsOf(s.id), added = [];
+    const old = mainsOf(s.id), oldPdf = MAINPDF[s.id], added = [];
     try {
       for (let i = 0; i < pages.length; i++) {
         say(`올리는 중… ${i + 1} / ${pages.length}`);
@@ -304,11 +308,21 @@
         if (ins.error) throw ins.error;
         added.push({ ...row, site: s.id });
       }
+      if (pdfFile) { // 고객이 그대로 받을 수 있게 원본 PDF 보관
+        say('원본 PDF 저장 중…');
+        const id = crypto.randomUUID(), key = `ph/${id}_doc.pdf`;
+        await putFile(key, pdfFile, 'application/pdf');
+        const row = { id, type: 'mainpdf', ord: 0, site_id: s.id, phase: 'after', space: '메인파일', t: key, l: key, w: 0, h: 0, src_name: pdfFile.name, src_size: pdfFile.size };
+        const ins = await sb.from('pf_photos').insert(row);
+        if (ins.error) throw ins.error;
+        MAINPDF[s.id] = { ...row, site: s.id };
+      } else delete MAINPDF[s.id];
     } catch (e) {
       if (added.length) await api('POST', '/photos/batch-delete', { ids: added.map(a => a.id) }).catch(() => {});
       say(''); busy(false); return toast('올리기 실패: ' + (e.message || e), 4000);
     }
-    if (old.length) await api('POST', '/photos/batch-delete', { ids: old.map(p => p.id) }).catch(() => {});
+    const oldIds = old.map(p => p.id).concat(oldPdf && (!MAINPDF[s.id] || MAINPDF[s.id].id !== oldPdf.id) ? [oldPdf.id] : []);
+    if (oldIds.length) await api('POST', '/photos/batch-delete', { ids: oldIds }).catch(() => {});
     const gone = new Set(old.map(p => p.id));
     DATA.photos = DATA.photos.filter(p => !gone.has(p.id)).concat(added);
     usage = null; toast(`메인파일 ${added.length}쪽을 올렸어요`); render();
@@ -324,9 +338,39 @@
         <h1>${esc(s.name)}</h1>
         ${info.length ? `<dl class="info">${info.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : ''}
         ${s.info['설명'] ? `<p class="desc">${esc(s.info['설명'])}</p>` : ''}
+        <button class="btn primary dl-main" type="button" id="dlMain">⬇ 메인파일 다운로드</button>
       </div>
       <div class="main-pages">${mains.map((p, i) => photoHTML(p, i, { noBadge: true, noCap: true })).join('')}</div>`;
     bindPhotos(mains);
+    $('#dlMain').onclick = () => downloadMain(s, mains);
+  }
+  // 원본 PDF가 있으면 그대로, 없으면 메인파일 이미지들을 PDF 한 개로 묶어서 내려받기
+  async function downloadMain(s, mains) {
+    const btn = $('#dlMain'), label = btn.textContent;
+    const save = (blob, name) => { const u = URL.createObjectURL(blob), a = document.createElement('a'); a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 30000); };
+    const safe = s.name.replace(/[\\/:*?"<>|]/g, '_');
+    btn.disabled = true;
+    try {
+      const pdf = MAINPDF[s.id];
+      if (pdf) { btn.textContent = '받는 중…'; const r = await fetch(imgUrl(pdf.l)); if (!r.ok) throw new Error('파일을 못 받았어요'); save(await r.blob(), `${safe}.pdf`); }
+      else {
+        btn.textContent = 'PDF 만드는 중…';
+        if (!window.jspdf) await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'; sc.onload = res; sc.onerror = () => rej(new Error('PDF 도구를 못 불러왔어요')); document.head.appendChild(sc); });
+        let doc = null;
+        for (let i = 0; i < mains.length; i++) {
+          btn.textContent = `PDF 만드는 중… ${i + 1} / ${mains.length}`;
+          const blob = await (await fetch(imgUrl(mains[i].l))).blob();
+          const img = await loadImg(blob), w = img.naturalWidth, h = img.naturalHeight;
+          const data = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
+          const o = w > h ? 'l' : 'p';
+          if (!doc) doc = new window.jspdf.jsPDF({ orientation: o, unit: 'px', format: [w, h], compress: true });
+          else doc.addPage([w, h], o);
+          doc.addImage(data, 'JPEG', 0, 0, w, h);
+        }
+        save(doc.output('blob'), `${safe}.pdf`);
+      }
+    } catch (e) { toast('다운로드 실패: ' + (e.message || e), 4000); }
+    btn.disabled = false; btn.textContent = label;
   }
 
   // ---------- 라이트박스 ----------
