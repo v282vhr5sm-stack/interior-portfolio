@@ -281,7 +281,7 @@
             const vp = page.getViewport({ scale: Math.min(4, 2000 / Math.max(v1.width, v1.height)) });
             const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
             const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
-            await page.render({ canvasContext: g, viewport: vp, canvas: c }).promise;
+            await page.render({ canvasContext: g, viewport: vp, canvas: c, intent: 'print' }).promise;
             pages.push({ src: c, name: `${f.name} ${i}쪽` });
             page.cleanup();
           }
@@ -744,10 +744,11 @@
       return (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) ||
         (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) ||
         (b[0] === 0x49 && b[1] === 0x49 && b[2] === 0x2A && b[3] === 0) || (b[0] === 0x4D && b[1] === 0x4D && b[2] === 0 && b[3] === 0x2A) ||
-        ['ftyp', 'moov', 'mdat', 'wide', 'free', 'skip'].includes(box);
+        ['ftyp', 'moov', 'mdat', 'wide', 'free', 'skip'].includes(box) ||
+        (b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46); // %PDF
     } catch { return false; }
   };
-  const OK_EXT = /\.(jpe?g|png|dng|mp4|mov|m4v)$/i;
+  const OK_EXT = /\.(jpe?g|png|dng|mp4|mov|m4v|pdf)$/i;
   const PHASE_RE = [
     ['before', /^(공사\s*전|시공\s*전|전|before|비포)$/i],
     ['during', /^(공사\s*중|시공\s*중|중|during|진행)$/i],
@@ -785,7 +786,7 @@
             </div>
           </div>
           <label class="pick ${ready() ? '' : 'off'}" id="pickLbl">
-            <input type="file" id="upFiles" accept="image/*,video/mp4,video/quicktime,.dng,.mp4,.mov" multiple hidden>
+            <input type="file" id="upFiles" accept="image/*,video/mp4,video/quicktime,application/pdf,.pdf,.dng,.mp4,.mov" multiple hidden>
             <b>4. 사진 선택</b><small id="pickHint">${pickHint()}</small>
           </label>
           <div class="capture-row">
@@ -970,6 +971,7 @@
     const siteId = await resolveSite();
     if (siteId === undefined) return;
     const target = { siteId, phase: up.phase, space: up.space };
+    files = await expandPdfs(files);
     for (let i = 0; i < files.length; i++) {
       let src = files[i];
       if (isVideoFile(src)) { enqueue([{ file: src, ...target }]); continue; } // 동영상은 자르지 않고 그대로
@@ -1033,7 +1035,47 @@
     $('#upFill').style.width = (queue.total ? (queue.done + queue.failed.length) / queue.total * 100 : 0) + '%';
     const q = $('#queue'); if (q) q.outerHTML = queueHTML();
   }
+  // PDF 파일 → 쪽마다 JPEG 사진 파일로 (일반 사진 올리기·폴더 올리기·자르기에서 공통)
+  const isPdf = f => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+  async function pdfToFiles(f, say) {
+    const pdfjs = await loadPdfJs();
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(await f.arrayBuffer()) }).promise;
+    const out = [], base = f.name.replace(/\.pdf$/i, '');
+    for (let i = 1; i <= doc.numPages; i++) {
+      if (say) say(`PDF를 사진으로 바꾸는 중… ${f.name} ${i} / ${doc.numPages}쪽`);
+      const page = await doc.getPage(i);
+      const v1 = page.getViewport({ scale: 1 });
+      const vp = page.getViewport({ scale: Math.min(4, 2000 / Math.max(v1.width, v1.height)) });
+      const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+      await page.render({ canvasContext: g, viewport: vp, canvas: c, intent: 'print' }).promise;
+      const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92));
+      out.push(new File([blob], `${base} ${i}쪽.jpg`, { type: 'image/jpeg' }));
+      page.cleanup();
+    }
+    try { if (typeof doc.destroy === 'function') await doc.destroy(); } catch {}
+    return out;
+  }
+  async function expandPdfs(files) {
+    if (!files.some(isPdf)) return files;
+    const out = [];
+    for (const f of files) {
+      if (!isPdf(f)) { out.push(f); continue; }
+      try { out.push(...await pdfToFiles(f, t => toast(t, 4000))); }
+      catch (e) { toast(f.name + ': PDF를 열 수 없어요', 4000); }
+    }
+    return out;
+  }
   async function enqueue(jobs) {
+    if (jobs.some(j => isPdf(j.file))) {
+      const out = [];
+      for (const j of jobs) {
+        if (!isPdf(j.file)) { out.push(j); continue; }
+        for (const file of await expandPdfs([j.file])) out.push({ ...j, file });
+      }
+      jobs = out;
+      if (!jobs.length) return;
+    }
     try {
       if (!usage) { const r = await fetch(`${CFG.API_URL}/usage`, { headers: await authHeader() }); if (r.ok) usage = await r.json(); }
       const need = jobs.reduce((n, j) => n + (isVideoFile(j.file) ? j.file.size : 700000), 0);
@@ -1062,8 +1104,12 @@
   const isDng = f => /\.dng$/i.test(f.name) || /dng/i.test(f.type);
   async function loadImg(blob) {
     const url = URL.createObjectURL(blob);
-    try { const img = new Image(); img.src = url; await img.decode(); return img; }
-    finally { setTimeout(() => URL.revokeObjectURL(url), 0); }
+    // decode()는 다른 탭으로 넘어가 있으면 멈출 수 있어서 onload로 기다림
+    try {
+      const img = new Image();
+      await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('이미지를 열 수 없음')); img.src = url; });
+      return img;
+    } finally { setTimeout(() => URL.revokeObjectURL(url), 0); }
   }
   // DNG(RAW): 브라우저가 직접 못 열면 파일 안에 들어 있는 미리보기 JPEG 중 가장 큰 것을 꺼내 씀
   async function dngPreview(file) {
@@ -1229,7 +1275,7 @@
         return `<li><b>${k === '\u0000' ? esc(CFG.etcName) : esc(k)}</b>${k !== '\u0000' && !nameToId[k] ? ' <span class="tag">새 현장</span>' : ''}
           <small>${PH_ORDER.filter(ph => by[ph]).map(ph => `${PH_NAME[ph]} ${by[ph]}`).join(' · ')} — ${sortSpaces(arr.map(i => i.space)).join(', ')}</small></li>`;
       }).join('')}</ul>
-      ${skipped.length ? `<p class="err">JPG·PNG·DNG·MP4가 아닌 파일 ${skipped.length}개는 안 올려요</p>` : ''}
+      ${skipped.length ? `<p class="err">JPG·PNG·DNG·PDF·MP4가 아닌 파일 ${skipped.length}개는 안 올려요</p>` : ''}
       ${todo.length ? `<button class="btn primary" id="dirGo">${todo.length}장 올리기</button>` : ''}</div>`;
     if ($('#dirGo')) $('#dirGo').onclick = runFolder;
     $('#dirClear').onclick = () => { picked.clear(); plan = null; $('#dirPlan').innerHTML = ''; };
