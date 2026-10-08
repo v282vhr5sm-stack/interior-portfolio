@@ -378,3 +378,4 @@ main.sel-mode { padding-bottom: 220px; }
 @media (min-width: 900px) { .cards { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; } }
 /* 고객: 메인파일 다운로드 버튼 */
 .pub-head .dl-main { margin-top: 12px; }
+.pub-photos { margin-top: 30px; } .pub-photos small { font-weight: 500; }

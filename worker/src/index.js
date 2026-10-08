@@ -59,11 +59,15 @@ export default {
       if (req.method === 'GET' && path === '/data') {
         let sites = (await env.DB.prepare(`SELECT * FROM sites ${admin ? '' : 'WHERE hidden = 0'} ORDER BY sort DESC`).all()).results.map(siteOut);
         const ok = new Set(sites.map(s => s.id));
-        const photos = (await env.DB.prepare('SELECT * FROM photos ORDER BY created_at').all()).results
-          .filter(p => admin || ((p.type === 'main' || p.type === 'mainpdf') && ok.has(p.site_id))) // 고객은 현장 메인파일(+원본 PDF)만
+        let photos = (await env.DB.prepare('SELECT * FROM photos ORDER BY created_at').all()).results
+          .filter(p => admin || ((p.type === 'main' || p.type === 'mainpdf' || p.phase === 'after') && ok.has(p.site_id))) // 고객: 메인파일(+원본 PDF) + 공사후 사진
           .sort((a, b) => (a.type === 'main' && b.type === 'main' ? a.ord - b.ord : 0))
           .map(p => admin ? p : { ...p, src_name: undefined, src_size: undefined });
-        if (!admin) { const has = new Set(photos.map(p => p.site_id)); sites = sites.filter(s => has.has(s.id)); } // 메인파일 있는 현장만
+        if (!admin) { // 고객 목록에는 메인파일 있는 현장만
+          const has = new Set(photos.filter(p => p.type === 'main').map(p => p.site_id));
+          sites = sites.filter(s => has.has(s.id));
+          photos = photos.filter(p => has.has(p.site_id));
+        }
         return json({ sites, photos, v: await getVersion(env), admin });
       }
 

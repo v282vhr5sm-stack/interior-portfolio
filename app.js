@@ -327,48 +327,46 @@
     DATA.photos = DATA.photos.filter(p => !gone.has(p.id)).concat(added);
     usage = null; toast(`메인파일 ${added.length}쪽을 올렸어요`); render();
   }
-  // 고객 링크: 현장 메인파일만
+  // 고객 링크: 메인파일 + 공사후 현장 사진(공간별). 다운로드는 메인파일 원본 PDF만
   function viewSitePublic(s) {
     const mains = mainsOf(s.id);
     if (!mains.length) return (location.hash = '#/sites');
     const info = Object.entries(s.info).filter(([k, v]) => k !== '설명' && v);
+    const ps = DATA.photos.filter(p => p.site === s.id && !isMain(p) && p.phase === 'after');
+    const spaces = sortSpaces(ps.map(p => p.space));
+    const all = [...mains]; // 크게 보기에서 메인파일 → 현장 사진 순서로 넘어가게 한 목록
+    const mainHTML = mains.map(p => photoHTML(p, all.indexOf(p), { noBadge: true, noCap: true })).join('');
+    const blocks = spaces.map(sp => {
+      const inSp = ps.filter(p => p.space === sp);
+      return `<section class="space-sec"><h2>${esc(spLabel(sp))} <small>${inSp.length}장</small></h2>
+        <div class="strip">${inSp.map(p => photoHTML(p, all.push(p) - 1, { strip: true, noBadge: true, noCap: true })).join('')}</div></section>`;
+    }).join('');
+    const pdf = MAINPDF[s.id];
     app.innerHTML = `
       <a class="back" href="#/sites">← 현장 목록</a>
       <div class="pub-head">
         <h1>${esc(s.name)}</h1>
         ${info.length ? `<dl class="info">${info.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : ''}
         ${s.info['설명'] ? `<p class="desc">${esc(s.info['설명'])}</p>` : ''}
-        <button class="btn primary dl-main" type="button" id="dlMain">⬇ 메인파일 다운로드</button>
+        ${pdf ? '<button class="btn primary dl-main" type="button" id="dlMain">⬇ 메인파일 PDF 다운로드</button>' : ''}
       </div>
-      <div class="main-pages">${mains.map((p, i) => photoHTML(p, i, { noBadge: true, noCap: true })).join('')}</div>`;
-    bindPhotos(mains);
-    $('#dlMain').onclick = () => downloadMain(s, mains);
+      <div class="main-pages">${mainHTML}</div>
+      ${ps.length ? `<h2 class="section-title pub-photos">현장 사진 <small>${ps.length}장</small></h2>${blocks}` : ''}`;
+    bindPhotos(all);
+    if (pdf) $('#dlMain').onclick = () => downloadMain(s);
   }
-  // 원본 PDF가 있으면 그대로, 없으면 메인파일 이미지들을 PDF 한 개로 묶어서 내려받기
-  async function downloadMain(s, mains) {
+  // 메인파일로 올린 원본 PDF 그대로 내려받기
+  async function downloadMain(s) {
+    const pdf = MAINPDF[s.id]; if (!pdf) return;
     const btn = $('#dlMain'), label = btn.textContent;
-    const save = (blob, name) => { const u = URL.createObjectURL(blob), a = document.createElement('a'); a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 30000); };
-    const safe = s.name.replace(/[\\/:*?"<>|]/g, '_');
-    btn.disabled = true;
+    btn.disabled = true; btn.textContent = '받는 중…';
     try {
-      const pdf = MAINPDF[s.id];
-      if (pdf) { btn.textContent = '받는 중…'; const r = await fetch(imgUrl(pdf.l)); if (!r.ok) throw new Error('파일을 못 받았어요'); save(await r.blob(), `${safe}.pdf`); }
-      else {
-        btn.textContent = 'PDF 만드는 중…';
-        if (!window.jspdf) await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'; sc.onload = res; sc.onerror = () => rej(new Error('PDF 도구를 못 불러왔어요')); document.head.appendChild(sc); });
-        let doc = null;
-        for (let i = 0; i < mains.length; i++) {
-          btn.textContent = `PDF 만드는 중… ${i + 1} / ${mains.length}`;
-          const blob = await (await fetch(imgUrl(mains[i].l))).blob();
-          const img = await loadImg(blob), w = img.naturalWidth, h = img.naturalHeight;
-          const data = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
-          const o = w > h ? 'l' : 'p';
-          if (!doc) doc = new window.jspdf.jsPDF({ orientation: o, unit: 'px', format: [w, h], compress: true });
-          else doc.addPage([w, h], o);
-          doc.addImage(data, 'JPEG', 0, 0, w, h);
-        }
-        save(doc.output('blob'), `${safe}.pdf`);
-      }
+      const r = await fetch(imgUrl(pdf.l));
+      if (!r.ok) throw new Error('파일을 못 받았어요');
+      const u = URL.createObjectURL(await r.blob()), a = document.createElement('a');
+      a.href = u; a.download = `${s.name.replace(/[\\/:*?"<>|]/g, '_')}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(u), 30000);
     } catch (e) { toast('다운로드 실패: ' + (e.message || e), 4000); }
     btn.disabled = false; btn.textContent = label;
   }
